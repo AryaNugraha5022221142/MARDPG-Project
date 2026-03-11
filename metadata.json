@@ -1,0 +1,5 @@
+{
+  "name": "MARDPG Quadcopter Thesis",
+  "description": "Multi-Agent Recurrent Deterministic Policy Gradient for UAV path planning in complex 3D environments with dynamic obstacles.",
+  "requestFramePermissions": []
+}
