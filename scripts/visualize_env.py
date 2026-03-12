@@ -13,8 +13,8 @@ from envs.scenarios import get_scenario_config
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='Visualize the Quadcopter Environment')
-    parser.add_argument('--scenario', type=str, default='static_dense', 
-                        choices=['empty', 'static_dense', 'dynamic_chaos', 'narrow_passage'],
+    parser.add_argument('--scenario', type=str, default='city', 
+                        choices=['empty', 'static_dense', 'dynamic_chaos', 'narrow_passage', 'city', 'forest'],
                         help='Scenario to visualize')
     parser.add_argument('--agents', type=int, default=3, help='Number of agents')
     args = parser.parse_args()

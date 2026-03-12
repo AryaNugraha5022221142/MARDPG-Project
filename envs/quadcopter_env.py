@@ -245,14 +245,14 @@ class QuadcopterEnv:
                 # Oscillate around origin
                 obs['pos'] = obs['origin'] + obs['vel'] * np.sin(self.step_count * 0.05)
         
-        # Action mapping
+        # Action mapping (Increased speeds)
         action_map = {
-            0: [1.0, 0.0, 0.0, 0.0],
-            1: [0.5, 0.0, 0.0, 30.0],
-            2: [0.5, 0.0, 0.0, -30.0],
-            3: [0.5, 0.0, 0.5, 0.0],
-            4: [0.5, 0.0, -0.5, 0.0],
-            5: [0.0, 0.0, 0.0, 0.0]
+            0: [3.0, 0.0, 0.0, 0.0],  # Forward (Fast)
+            1: [1.5, 0.0, 0.0, 45.0], # Forward + Yaw Right
+            2: [1.5, 0.0, 0.0, -45.0],# Forward + Yaw Left
+            3: [1.5, 0.0, 1.5, 0.0],  # Forward + Up
+            4: [1.5, 0.0, -1.5, 0.0], # Forward + Down
+            5: [0.0, 0.0, 0.0, 0.0]   # Hover
         }
         
         # Apply actions
@@ -325,15 +325,19 @@ class QuadcopterEnv:
         self.ax.set_zlabel('Z (m)')
         self.ax.set_title(f'Step: {self.step_count}')
         
-        # Draw obstacles
+        # Draw obstacles (Better 3D representation)
         for obs in self.obstacles:
+            p = obs['pos']
             if obs['type'] == 'sphere':
-                self.ax.scatter(obs['pos'][0], obs['pos'][1], obs['pos'][2], color='gray', s=obs['radius']*100, alpha=0.5)
+                # Draw sphere as multiple boxes or a large scatter with better scaling
+                # Matplotlib scatter 's' is area, so we scale by radius squared
+                self.ax.scatter(p[0], p[1], p[2], color='gray', s=(obs['radius']*20)**2, alpha=0.6)
             else:
-                # Draw box (simplified as large scatter or wireframe)
-                p = obs['pos']
                 s = obs['size']
-                self.ax.bar3d(p[0]-s[0]/2, p[1]-s[1]/2, p[2]-s[2]/2, s[0], s[1], s[2], color='gray', alpha=0.3)
+                # Use bar3d for real 3D boxes
+                self.ax.bar3d(p[0]-s[0]/2, p[1]-s[1]/2, p[2]-s[2]/2, s[0], s[1], s[2], 
+                             color='gray' if not obs.get('is_tree') else 'brown', 
+                             alpha=0.5 if not obs.get('is_tree') else 0.8)
             
         # Draw goals and agents
         colors = ['red', 'green', 'blue', 'orange', 'purple', 'cyan']
