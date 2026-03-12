@@ -13,13 +13,19 @@ class QuadcopterEnv:
         self.scenario = scenario
         self.fig = None
         self.ax = None
+        
+        # Load scenario config if provided and no explicit config
+        if scenario is not None and config is None:
+            from .scenarios import get_scenario_config
+            config = get_scenario_config(scenario)
+            
         if config is None:
             config = {
-                'arena_size': [20.0, 20.0, 10.0],
-                'num_obstacles': 15,
-                'rangefinder_max_range': 15.0,
-                'collision_distance': 0.5,
-                'goal_distance': 1.0,
+                'arena_size': [100.0, 100.0, 40.0],
+                'num_obstacles': 25,
+                'rangefinder_max_range': 30.0,
+                'collision_distance': 0.8,
+                'goal_distance': 2.0,
                 'dt': 0.01,
                 'dynamic_ratio': 0.3
             }
@@ -306,6 +312,7 @@ class QuadcopterEnv:
             terminated = True
             info['success'] = True
             
+        self.last_info = info
         return obs, rewards, terminated, truncated, info
 
     def render(self):
@@ -329,7 +336,20 @@ class QuadcopterEnv:
         self.ax.set_xlabel('X (m)')
         self.ax.set_ylabel('Y (m)')
         self.ax.set_zlabel('Z (m)')
-        self.ax.set_title(f'Step: {self.step_count}')
+        
+        # Status indicators
+        status_text = f'Step: {self.step_count}'
+        if hasattr(self, 'last_info'):
+            if self.last_info.get('collision'):
+                status_text += " | COLLISION! 💥"
+                self.ax.set_facecolor((1.0, 0.9, 0.9)) # Light red background
+            elif self.last_info.get('success'):
+                status_text += " | SUCCESS! 🎯"
+                self.ax.set_facecolor((0.9, 1.0, 0.9)) # Light green background
+            else:
+                self.ax.set_facecolor('white')
+        
+        self.ax.set_title(status_text)
         
         # Draw obstacles (Better 3D representation)
         for obs in self.obstacles:

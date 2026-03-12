@@ -7,11 +7,11 @@ def get_scenario_config(scenario_name: str) -> Dict[str, Any]:
     Returns configuration for different environment scenarios.
     """
     base_config = {
-        'arena_size': [20.0, 20.0, 10.0],
-        'num_obstacles': 15,
-        'rangefinder_max_range': 15.0,
-        'collision_distance': 0.5,
-        'goal_distance': 1.0,
+        'arena_size': [100.0, 100.0, 40.0],
+        'num_obstacles': 25,
+        'rangefinder_max_range': 30.0,
+        'collision_distance': 0.8,
+        'goal_distance': 2.0,
         'dt': 0.01,
         'dynamic_ratio': 0.3
     }
