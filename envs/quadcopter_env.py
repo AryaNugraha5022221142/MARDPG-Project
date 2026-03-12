@@ -245,13 +245,13 @@ class QuadcopterEnv:
                 # Oscillate around origin
                 obs['pos'] = obs['origin'] + obs['vel'] * np.sin(self.step_count * 0.05)
         
-        # Action mapping (Increased speeds)
+        # Action mapping (Increased speeds for real-life feel)
         action_map = {
-            0: [3.0, 0.0, 0.0, 0.0],  # Forward (Fast)
-            1: [1.5, 0.0, 0.0, 45.0], # Forward + Yaw Right
-            2: [1.5, 0.0, 0.0, -45.0],# Forward + Yaw Left
-            3: [1.5, 0.0, 1.5, 0.0],  # Forward + Up
-            4: [1.5, 0.0, -1.5, 0.0], # Forward + Down
+            0: [6.0, 0.0, 0.0, 0.0],  # Forward (Very Fast)
+            1: [3.0, 0.0, 0.0, 60.0], # Forward + Yaw Right
+            2: [3.0, 0.0, 0.0, -60.0],# Forward + Yaw Left
+            3: [3.0, 0.0, 3.0, 0.0],  # Forward + Up
+            4: [3.0, 0.0, -3.0, 0.0], # Forward + Down
             5: [0.0, 0.0, 0.0, 0.0]   # Hover
         }
         
@@ -329,15 +329,14 @@ class QuadcopterEnv:
         for obs in self.obstacles:
             p = obs['pos']
             if obs['type'] == 'sphere':
-                # Draw sphere as multiple boxes or a large scatter with better scaling
-                # Matplotlib scatter 's' is area, so we scale by radius squared
-                self.ax.scatter(p[0], p[1], p[2], color='gray', s=(obs['radius']*20)**2, alpha=0.6)
+                self.ax.scatter(p[0], p[1], p[2], color=obs.get('color', 'gray'), s=(obs['radius']*20)**2, alpha=0.6)
             else:
                 s = obs['size']
                 # Use bar3d for real 3D boxes
+                color = obs.get('color', 'gray')
+                if obs.get('is_tree'): color = 'brown'
                 self.ax.bar3d(p[0]-s[0]/2, p[1]-s[1]/2, p[2]-s[2]/2, s[0], s[1], s[2], 
-                             color='gray' if not obs.get('is_tree') else 'brown', 
-                             alpha=0.5 if not obs.get('is_tree') else 0.8)
+                             color=color, alpha=0.6)
             
         # Draw goals and agents
         colors = ['red', 'green', 'blue', 'orange', 'purple', 'cyan']
