@@ -79,8 +79,9 @@ You can test the algorithms in different scenarios by using the `--scenario` fla
 - `static_dense`: 40 static obstacles, high density.
 - `dynamic_chaos`: 20 obstacles, 80% are moving dynamically.
 - `narrow_passage`: A real wall with a gap that agents must navigate through.
-- `city`: 60 tall buildings in a 40x40 arena.
-- `forest`: 100 thin trees in a 40x40 arena.
+- `city`: **Urban Canyon** - High-rise buildings in a grid with No-Fly Zones and altitude limits.
+- `warzone`: **Contested Airspace** - Terrain masking, Radar detection zones (yellow), and lethal Missile envelopes (red).
+- `forest`: **Under-canopy** - Dense trunks (brown) and branches (green) requiring precise navigation.
 
 ## 🏗️ Environment Structure
 - **State Space (28D)**: 25 rangefinder rays (5x5 grid) + 3D relative goal info.

@@ -35,16 +35,24 @@ def get_scenario_config(scenario_name: str) -> Dict[str, Any]:
         
     elif scenario_name == 'city':
         config = base_config.copy()
-        config['num_obstacles'] = 40 # Fewer but more complex
-        config['dynamic_ratio'] = 0.05
-        config['arena_size'] = [50.0, 50.0, 25.0]
+        config['num_obstacles'] = 80 
+        config['dynamic_ratio'] = 0.0
+        config['arena_size'] = [100.0, 100.0, 40.0]
+        config['altitude_limit'] = [5.0, 35.0]
+        return config
+        
+    elif scenario_name == 'warzone':
+        config = base_config.copy()
+        config['num_obstacles'] = 30
+        config['dynamic_ratio'] = 0.2
+        config['arena_size'] = [100.0, 100.0, 50.0]
         return config
         
     elif scenario_name == 'forest':
         config = base_config.copy()
-        config['num_obstacles'] = 100
-        config['dynamic_ratio'] = 0.2
-        config['arena_size'] = [40.0, 40.0, 15.0]
+        config['num_obstacles'] = 150
+        config['dynamic_ratio'] = 0.0
+        config['arena_size'] = [60.0, 60.0, 20.0]
         return config
         
     elif scenario_name == 'narrow_passage':
@@ -89,39 +97,131 @@ def apply_scenario_custom_logic(env, scenario_name: str):
         })
         
     elif scenario_name == 'city':
-        # Generate varied buildings with colors
-        building_colors = ['#4682B4', '#708090', '#2F4F4F', '#A9A9A9', '#808080', '#B0C4DE']
+        # Urban Canyon: High-rise buildings in a grid
+        building_colors = ['#2c3e50', '#34495e', '#7f8c8d', '#95a5a6', '#bdc3c7']
+        nfz_color = '#e74c3c' # Red for No-Fly Zones
         
-        # Grid-like but randomized distribution for a city feel
-        grid_size = 10.0
-        for x in np.arange(5.0, env.arena_size[0] - 5.0, grid_size):
-            for y in np.arange(5.0, env.arena_size[1] - 5.0, grid_size):
-                if np.random.random() < 0.7: # 70% chance of a building in this grid cell
-                    # Randomize position within cell
-                    pos_x = x + np.random.uniform(-2.0, 2.0)
-                    pos_y = y + np.random.uniform(-2.0, 2.0)
-                    
-                    # Randomize building type
-                    b_type = np.random.choice(['tower', 'complex', 'low'])
-                    color = np.random.choice(building_colors)
-                    
-                    if b_type == 'tower':
-                        size = np.array([np.random.uniform(3, 5), np.random.uniform(3, 5), np.random.uniform(15, 22)])
-                        pos = np.array([pos_x, pos_y, size[2]/2])
-                        env.obstacles.append({'type': 'box', 'pos': pos, 'size': size, 'vel': np.zeros(3), 'origin': pos.copy(), 'color': color})
-                    elif b_type == 'complex':
-                        # Two boxes combined
-                        size1 = np.array([np.random.uniform(4, 6), np.random.uniform(4, 6), np.random.uniform(8, 12)])
-                        pos1 = np.array([pos_x, pos_y, size1[2]/2])
-                        env.obstacles.append({'type': 'box', 'pos': pos1, 'size': size1, 'vel': np.zeros(3), 'origin': pos1.copy(), 'color': color})
-                        
-                        size2 = np.array([size1[0]*0.6, size1[1]*1.2, size1[2]*0.5])
-                        pos2 = pos1 + np.array([0, 0, size1[2]/2 + size2[2]/2])
-                        env.obstacles.append({'type': 'box', 'pos': pos2, 'size': size2, 'vel': np.zeros(3), 'origin': pos2.copy(), 'color': color})
-                    else: # low
-                        size = np.array([np.random.uniform(6, 10), np.random.uniform(6, 10), np.random.uniform(3, 6)])
-                        pos = np.array([pos_x, pos_y, size[2]/2])
-                        env.obstacles.append({'type': 'box', 'pos': pos, 'size': size, 'vel': np.zeros(3), 'origin': pos.copy(), 'color': color})
+        spacing = 15.0
+        for x in np.arange(10.0, env.arena_size[0] - 10.0, spacing):
+            for y in np.arange(10.0, env.arena_size[1] - 10.0, spacing):
+                # Randomize building footprint and height
+                w = np.random.uniform(6, 10)
+                d = np.random.uniform(6, 10)
+                h = np.random.uniform(15, 38)
+                
+                pos = np.array([x, y, h/2])
+                env.obstacles.append({
+                    'type': 'box',
+                    'pos': pos,
+                    'size': np.array([w, d, h]),
+                    'vel': np.zeros(3),
+                    'origin': pos.copy(),
+                    'color': np.random.choice(building_colors),
+                    'is_building': True
+                })
+                
+                # Occasionally add a No-Fly Zone between buildings
+                if np.random.random() < 0.1:
+                    nfz_h = env.arena_size[2]
+                    nfz_pos = np.array([x + spacing/2, y + spacing/2, nfz_h/2])
+                    env.obstacles.append({
+                        'type': 'box',
+                        'pos': nfz_pos,
+                        'size': np.array([4, 4, nfz_h]),
+                        'vel': np.zeros(3),
+                        'origin': nfz_pos.copy(),
+                        'color': nfz_color,
+                        'is_nfz': True,
+                        'alpha': 0.3
+                    })
+
+    elif scenario_name == 'warzone':
+        # Warzone: Terrain, Radars, and Missile Envelopes
+        radar_color = '#f1c40f' # Yellow
+        missile_color = '#c0392b' # Dark Red
+        terrain_color = '#34495e'
+        
+        # 1. Terrain (Hills/Valleys)
+        for x in np.arange(0, env.arena_size[0], 10):
+            for y in np.arange(0, env.arena_size[1], 10):
+                h = np.random.uniform(2, 12)
+                pos = np.array([x+5, y+5, h/2])
+                env.obstacles.append({
+                    'type': 'box',
+                    'pos': pos,
+                    'size': np.array([10, 10, h]),
+                    'vel': np.zeros(3),
+                    'origin': pos.copy(),
+                    'color': terrain_color,
+                    'is_terrain': True
+                })
+        
+        # 2. Radars (Large detection zones)
+        for _ in range(5):
+            pos = np.array([np.random.uniform(20, 80), np.random.uniform(20, 80), np.random.uniform(10, 30)])
+            radius = np.random.uniform(15, 25)
+            env.obstacles.append({
+                'type': 'sphere',
+                'pos': pos,
+                'radius': radius,
+                'vel': np.random.uniform(-1, 1, 3) * 0.5,
+                'origin': pos.copy(),
+                'color': radar_color,
+                'is_radar': True,
+                'alpha': 0.1
+            })
+            
+        # 3. Missile Batteries (Lethal zones)
+        for _ in range(8):
+            pos = np.array([np.random.uniform(10, 90), np.random.uniform(10, 90), np.random.uniform(5, 40)])
+            radius = np.random.uniform(5, 8)
+            env.obstacles.append({
+                'type': 'sphere',
+                'pos': pos,
+                'radius': radius,
+                'vel': np.zeros(3),
+                'origin': pos.copy(),
+                'color': missile_color,
+                'is_missile': True,
+                'alpha': 0.4
+            })
+
+    elif scenario_name == 'forest':
+        # Forest: Trunks and Branches
+        trunk_color = '#5d4037' # Brown
+        leaf_color = '#2e7d32' # Green
+        
+        for _ in range(env.num_obstacles):
+            # Trunk
+            tx, ty = np.random.uniform(5, env.arena_size[0]-5), np.random.uniform(5, env.arena_size[1]-5)
+            th = np.random.uniform(8, 18)
+            tpos = np.array([tx, ty, th/2])
+            env.obstacles.append({
+                'type': 'box',
+                'pos': tpos,
+                'size': np.array([0.8, 0.8, th]),
+                'vel': np.zeros(3),
+                'origin': tpos.copy(),
+                'color': trunk_color,
+                'is_trunk': True
+            })
+            
+            # Branches (2-3 per tree)
+            for _ in range(np.random.randint(1, 4)):
+                bh_z = np.random.uniform(th*0.4, th)
+                bl = np.random.uniform(2, 5)
+                angle = np.random.uniform(0, 2*np.pi)
+                bpos = np.array([tx + np.cos(angle)*bl/2, ty + np.sin(angle)*bl/2, bh_z])
+                env.obstacles.append({
+                    'type': 'box',
+                    'pos': bpos,
+                    'size': np.array([bl, 0.3, 0.3]) if np.random.random() > 0.5 else np.array([0.3, bl, 0.3]),
+                    'vel': np.zeros(3),
+                    'origin': bpos.copy(),
+                    'color': leaf_color,
+                    'is_branch': True,
+                    'alpha': 0.7
+                })
             
     elif scenario_name == 'forest':
         # Generate many thin cylinders (trees)

@@ -247,12 +247,12 @@ class QuadcopterEnv:
         
         # Action mapping (Increased speeds for real-life feel)
         action_map = {
-            0: [6.0, 0.0, 0.0, 0.0],  # Forward (Very Fast)
-            1: [3.0, 0.0, 0.0, 60.0], # Forward + Yaw Right
-            2: [3.0, 0.0, 0.0, -60.0],# Forward + Yaw Left
-            3: [3.0, 0.0, 3.0, 0.0],  # Forward + Up
-            4: [3.0, 0.0, -3.0, 0.0], # Forward + Down
-            5: [0.0, 0.0, 0.0, 0.0]   # Hover
+            0: [10.0, 0.0, 0.0, 0.0], # Forward (Extreme)
+            1: [5.0, 0.0, 0.0, 90.0],  # Forward + Yaw Right
+            2: [5.0, 0.0, 0.0, -90.0], # Forward + Yaw Left
+            3: [5.0, 0.0, 5.0, 0.0],   # Forward + Up
+            4: [5.0, 0.0, -5.0, 0.0],  # Forward + Down
+            5: [0.0, 0.0, 0.0, 0.0]    # Hover
         }
         
         # Apply actions
@@ -328,15 +328,15 @@ class QuadcopterEnv:
         # Draw obstacles (Better 3D representation)
         for obs in self.obstacles:
             p = obs['pos']
+            alpha = obs.get('alpha', 0.6)
             if obs['type'] == 'sphere':
-                self.ax.scatter(p[0], p[1], p[2], color=obs.get('color', 'gray'), s=(obs['radius']*20)**2, alpha=0.6)
+                self.ax.scatter(p[0], p[1], p[2], color=obs.get('color', 'gray'), s=(obs['radius']*10)**2, alpha=alpha)
             else:
                 s = obs['size']
                 # Use bar3d for real 3D boxes
                 color = obs.get('color', 'gray')
-                if obs.get('is_tree'): color = 'brown'
                 self.ax.bar3d(p[0]-s[0]/2, p[1]-s[1]/2, p[2]-s[2]/2, s[0], s[1], s[2], 
-                             color=color, alpha=0.6)
+                             color=color, alpha=alpha)
             
         # Draw goals and agents
         colors = ['red', 'green', 'blue', 'orange', 'purple', 'cyan']
