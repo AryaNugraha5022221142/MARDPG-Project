@@ -49,17 +49,41 @@ The goal of this project is to train multiple UAVs (quadcopters) to navigate fro
 
 ## 🏃 Usage
 
-### Training
-To start the training process with 3D visualization:
+### 1. Visualize the Environment
+To see the environment scenarios without training:
 ```bash
-python scripts/train.py --config config/config.yaml --run-name my_first_test --render
+python scripts/visualize_env.py --scenario static_dense
 ```
 
-### Evaluation
+### 2. Test Classical Baseline (Potential Field)
+Before running MARDPG, you can test a classical navigation algorithm:
+```bash
+python scripts/test_classical.py --scenario static_dense --render
+```
+
+### 3. Training
+To start the training process:
+```bash
+python scripts/train.py --config config/config.yaml --run-name my_first_test
+```
+
+### 4. Evaluation
 To test a trained model:
 ```bash
-python scripts/evaluate.py --config config/config.yaml --model-path checkpoints/actor_agent_0.pt --render
+python scripts/evaluate.py --config config/config.yaml --checkpoint checkpoints/mardpg_final.pt --render
 ```
+
+## 🌍 Environment Scenarios
+You can test the algorithms in different scenarios by using the `--scenario` flag in the scripts:
+- `empty`: No obstacles, pure navigation test.
+- `static_dense`: 40 static obstacles, high density.
+- `dynamic_chaos`: 20 obstacles, 80% are moving dynamically.
+- `narrow_passage`: A wall with a small opening that agents must navigate through.
+
+## 🏗️ Environment Structure
+- **State Space (28D)**: 25 rangefinder rays (5x5 grid) + 3D relative goal info.
+- **Action Space (6D Discrete)**: Forward, Yaw Left/Right, Up, Down, Hover.
+- **Dynamics**: Simplified 3D quadcopter physics with inertia and drag.
 
 ## ☁️ Google Colab Workflow
 

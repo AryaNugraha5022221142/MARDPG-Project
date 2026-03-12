@@ -7,9 +7,10 @@ class QuadcopterEnv:
     """
     Multi-agent quadcopter environment with 3D obstacles.
     """
-    def __init__(self, num_agents: int = 3, config: Dict[str, Any] = None, render_mode: str = None):
+    def __init__(self, num_agents: int = 3, config: Dict[str, Any] = None, render_mode: str = None, scenario: str = None):
         self.num_agents = num_agents
         self.render_mode = render_mode
+        self.scenario = scenario
         self.fig = None
         self.ax = None
         if config is None:
@@ -19,7 +20,8 @@ class QuadcopterEnv:
                 'rangefinder_max_range': 15.0,
                 'collision_distance': 0.5,
                 'goal_distance': 1.0,
-                'dt': 0.01
+                'dt': 0.01,
+                'dynamic_ratio': 0.3
             }
         self.arena_size = np.array(config['arena_size'], dtype=np.float32)
         self.num_obstacles = config['num_obstacles']
@@ -27,6 +29,7 @@ class QuadcopterEnv:
         self.collision_dist = config['collision_distance']
         self.goal_dist = config['goal_distance']
         self.dt = config['dt']
+        self.dynamic_ratio = config.get('dynamic_ratio', 0.3)
         
         self.arena_diagonal = np.linalg.norm(self.arena_size)
         
@@ -45,6 +48,11 @@ class QuadcopterEnv:
 
     def _generate_obstacles(self):
         """Generates random spherical and box obstacles, some dynamic."""
+        if self.scenario == 'narrow_passage':
+            from .scenarios import apply_scenario_custom_logic
+            apply_scenario_custom_logic(self, self.scenario)
+            return
+
         self.obstacles = []
         attempts = 0
         while len(self.obstacles) < self.num_obstacles and attempts < 1000:
@@ -56,7 +64,7 @@ class QuadcopterEnv:
             ])
             
             obs_type = np.random.choice(['sphere', 'box'])
-            is_dynamic = np.random.random() < 0.3 # 30% are dynamic
+            is_dynamic = np.random.random() < self.dynamic_ratio
             vel = np.random.uniform(-1.0, 1.0, size=3) if is_dynamic else np.zeros(3)
             
             if obs_type == 'sphere':
