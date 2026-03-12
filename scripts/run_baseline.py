@@ -1,6 +1,12 @@
 # scripts/run_baseline.py
 import numpy as np
 import time
+import os
+import sys
+
+# Add the project root to sys.path so it can find the 'envs' module
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from envs.quadcopter_env import QuadcopterEnv
 
 def run_apf_baseline(scenario='city', num_agents=3):
