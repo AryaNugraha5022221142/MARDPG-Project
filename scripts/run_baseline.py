@@ -28,10 +28,6 @@ def run_apf_baseline(scenario='city', num_agents=3):
         while True:
             actions = []
             for i in range(num_agents):
-                if env.dones[i]:
-                    actions.append(5) # Hover if done
-                    continue
-                
                 agent_pos = env.agents[i].state[:3]
                 goal_pos = env.goals[i]
                 
@@ -74,10 +70,10 @@ def run_apf_baseline(scenario='city', num_agents=3):
                     elif yaw_diff < -0.3: actions.append(2) # Left
                     else: actions.append(0) # Forward
             
-            obs, rewards, dones, truncated, info = env.step(actions)
+            obs, rewards, terminated, truncated, info = env.step(actions)
             env.render()
             
-            if all(dones):
+            if terminated or truncated:
                 print("Episode finished. Resetting...")
                 time.sleep(1.0)
                 obs, _ = env.reset()
