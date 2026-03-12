@@ -101,7 +101,7 @@ def apply_scenario_custom_logic(env, scenario_name: str):
         building_colors = ['#2c3e50', '#34495e', '#7f8c8d', '#95a5a6', '#bdc3c7']
         nfz_color = '#e74c3c' # Red for No-Fly Zones
         
-        spacing = 15.0
+        spacing = 12.0
         for x in np.arange(10.0, env.arena_size[0] - 10.0, spacing):
             for y in np.arange(10.0, env.arena_size[1] - 10.0, spacing):
                 # Randomize building footprint and height
@@ -222,24 +222,3 @@ def apply_scenario_custom_logic(env, scenario_name: str):
                     'is_branch': True,
                     'alpha': 0.7
                 })
-            
-    elif scenario_name == 'forest':
-        # Generate many thin cylinders (trees)
-        for _ in range(env.num_obstacles):
-            pos = np.array([
-                np.random.uniform(5.0, env.arena_size[0] - 5.0),
-                np.random.uniform(5.0, env.arena_size[1] - 5.0),
-                0.0
-            ])
-            radius = np.random.uniform(0.3, 0.8)
-            height = np.random.uniform(4.0, env.arena_size[2])
-            pos[2] = height / 2
-            # Represent tree as a tall box for collision simplicity
-            env.obstacles.append({
-                'type': 'box',
-                'pos': pos,
-                'size': np.array([radius*2, radius*2, height]),
-                'vel': np.zeros(3),
-                'origin': pos.copy(),
-                'is_tree': True
-            })

@@ -35,20 +35,27 @@ class QuadcopterEnv:
         
         self.agents = [QuadcopterDynamics(dt=self.dt) for _ in range(self.num_agents)]
         
-        # Fixed goals for agents
-        self.goals = np.array([
-            [17.0, 17.0, 5.0],
-            [17.0, 3.0, 5.0],
-            [3.0, 17.0, 5.0]
-        ], dtype=np.float32)
+        # Dynamic goals based on arena size
+        self.goals = np.zeros((self.num_agents, 3), dtype=np.float32)
+        self._update_goals()
         
         self.obstacles = []
         self.step_count = 0
-        self.max_steps = 500
+        self.max_steps = 1000 # Increased for larger arena
+    
+    def _update_goals(self):
+        """Updates goals based on arena size."""
+        # Place goals on the opposite side of the arena
+        for i in range(self.num_agents):
+            self.goals[i] = [
+                self.arena_size[0] - np.random.uniform(5, 15),
+                np.random.uniform(5, self.arena_size[1] - 5),
+                np.random.uniform(5, self.arena_size[2] - 5)
+            ]
 
     def _generate_obstacles(self):
         """Generates random spherical and box obstacles, some dynamic."""
-        if self.scenario == 'narrow_passage':
+        if self.scenario in ['narrow_passage', 'city', 'forest', 'warzone']:
             from .scenarios import apply_scenario_custom_logic
             apply_scenario_custom_logic(self, self.scenario)
             return
@@ -58,9 +65,9 @@ class QuadcopterEnv:
         while len(self.obstacles) < self.num_obstacles and attempts < 1000:
             attempts += 1
             pos = np.array([
-                np.random.uniform(2.0, 18.0),
-                np.random.uniform(2.0, 18.0),
-                np.random.uniform(1.0, 9.0)
+                np.random.uniform(5.0, self.arena_size[0] - 5.0),
+                np.random.uniform(5.0, self.arena_size[1] - 5.0),
+                np.random.uniform(1.0, self.arena_size[2] - 1.0)
             ])
             
             obs_type = np.random.choice(['sphere', 'box'])
@@ -97,16 +104,15 @@ class QuadcopterEnv:
         """Resets the environment and returns initial observations."""
         self.step_count = 0
         self._generate_obstacles()
+        self._update_goals() # Refresh goals for variety
         
-        # Random start positions
+        # Random start positions on the "left" side
         for i in range(self.num_agents):
             start_pos = np.array([
-                np.random.uniform(1.0, 4.0),
-                np.random.uniform(1.0, 4.0),
-                np.random.uniform(1.0, 4.0)
+                np.random.uniform(2.0, 8.0),
+                np.random.uniform(5.0, self.arena_size[1] - 5.0),
+                np.random.uniform(2.0, self.arena_size[2] - 2.0)
             ])
-            # Ensure start pos is different for each agent (simple approach)
-            start_pos[0] += i * 2.0
             start_yaw = np.random.uniform(-np.pi, np.pi)
             self.agents[i].reset(start_pos, start_yaw)
             
