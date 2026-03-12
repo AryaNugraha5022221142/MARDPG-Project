@@ -118,12 +118,16 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
     avg_collision = (collisions / num_episodes) * 100
     avg_latency = np.mean(latencies) * 1000 # ms
     
-    # Avoid division by zero
-    valid_paths = [p for p in path_lengths if p > 0]
-    if valid_paths:
-        efficiency = np.mean(np.array(ideal_lengths) / np.array(path_lengths)) * 100
-    else:
-        efficiency = 0
+    # Avoid division by zero and handle very short paths (collisions)
+    valid_efficiencies = []
+    for i in range(len(path_lengths)):
+        if path_lengths[i] > 0.5: # Only count if the UAV actually moved
+            eff = (ideal_lengths[i] / path_lengths[i]) * 100
+            valid_efficiencies.append(min(eff, 100.0)) # Cap at 100%
+        else:
+            valid_efficiencies.append(0.0)
+            
+    efficiency = np.mean(valid_efficiencies) if valid_efficiencies else 0.0
 
     print("\n" + "="*40)
     print("FINAL PERFORMANCE REPORT (APF)")
