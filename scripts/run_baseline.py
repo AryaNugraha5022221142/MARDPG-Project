@@ -3,89 +3,155 @@ import numpy as np
 import time
 import os
 import sys
+import argparse
+import matplotlib.pyplot as plt
 
-# Add the project root to sys.path so it can find the 'envs' module
+# Add the project root to sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from envs.quadcopter_env import QuadcopterEnv
 
-def run_apf_baseline(scenario='city', num_agents=3):
+def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True):
     """
-    Runs a classical Artificial Potential Field (APF) baseline.
+    Runs the APF baseline and collects performance metrics.
     """
-    env = QuadcopterEnv(num_agents=num_agents, render_mode='human', scenario=scenario)
-    obs, _ = env.reset()
+    env = QuadcopterEnv(num_agents=num_agents, render_mode='human' if render else None, scenario=scenario)
     
-    print(f"Running Classical Baseline (APF) on scenario: {scenario}")
-    print("Close the window or press Ctrl+C to stop.")
+    # Metrics storage
+    successes = 0
+    collisions = 0
+    latencies = []
+    path_lengths = []
+    ideal_lengths = []
     
-    # APF Hyperparameters
-    k_att = 1.0  # Attraction gain
-    k_rep = 50.0 # Repulsion gain
-    d_min = 5.0  # Distance at which repulsion starts
-    
-    try:
-        while True:
+    print(f"\n=== Evaluating Classical Baseline (APF) ===")
+    print(f"Scenario: {scenario} | Episodes: {num_episodes} | Agents: {num_agents}\n")
+
+    for ep in range(num_episodes):
+        obs, _ = env.reset()
+        done = False
+        ep_steps = 0
+        
+        # Track path length
+        start_positions = [agent.state[:3].copy() for agent in env.agents]
+        current_path_lengths = np.zeros(num_agents)
+        last_positions = [p.copy() for p in start_positions]
+        
+        # APF Hyperparameters
+        k_att = 1.0
+        k_rep = 50.0
+        d_min = 5.0
+        
+        while not done:
+            start_time = time.time()
+            
+            # APF Logic
             actions = []
             for i in range(num_agents):
                 agent_pos = env.agents[i].state[:3]
                 goal_pos = env.goals[i]
                 
-                # 1. Attractive Force (to goal)
+                # 1. Attractive force
                 f_att = (goal_pos - agent_pos)
-                f_att = f_att / np.linalg.norm(f_att) * k_att
+                dist_to_goal = np.linalg.norm(f_att)
+                if dist_to_goal > 0.1:
+                    f_att = f_att / dist_to_goal * k_att
                 
-                # 2. Repulsive Force (from obstacles)
+                # 2. Repulsive force
                 f_rep = np.zeros(3)
                 for obs_item in env.obstacles:
                     o_pos = obs_item['pos']
                     dist_vec = agent_pos - o_pos
                     dist = np.linalg.norm(dist_vec)
                     
-                    # Adjust distance for box size if necessary
                     if obs_item['type'] == 'box':
                         dist = max(0.1, dist - np.max(obs_item['size'])/2)
                     
                     if dist < d_min:
-                        # Repulsive force is inversely proportional to distance squared
                         rep_mag = k_rep * (1.0/dist - 1.0/d_min) / (dist**2)
                         f_rep += (dist_vec / np.linalg.norm(dist_vec)) * rep_mag
                 
-                # Total Force
                 f_total = f_att + f_rep
                 
                 # Map force to discrete actions
-                # Action map: 0:Fwd, 1:Fwd+Right, 2:Fwd+Left, 3:Fwd+Up, 4:Fwd+Down, 5:Hover
-                
-                # Simple heuristic mapping for APF
                 if f_total[2] > 0.5: actions.append(3) # Up
                 elif f_total[2] < -0.5: actions.append(4) # Down
                 else:
-                    # Calculate angle to force
                     target_yaw = np.arctan2(f_total[1], f_total[0])
-                    current_yaw = env.agents[i].state[3]
+                    current_yaw = env.agents[i].state[5]
                     yaw_diff = (target_yaw - current_yaw + np.pi) % (2 * np.pi) - np.pi
                     
                     if yaw_diff > 0.3: actions.append(1) # Right
                     elif yaw_diff < -0.3: actions.append(2) # Left
                     else: actions.append(0) # Forward
             
-            obs, rewards, terminated, truncated, info = env.step(actions)
-            env.render()
+            # Record Latency
+            latencies.append(time.time() - start_time)
             
-            if terminated or truncated:
-                print("Episode finished. Resetting...")
-                time.sleep(1.0)
-                obs, _ = env.reset()
-                
-    except KeyboardInterrupt:
-        print("\nBaseline stopped by user.")
+            # Step
+            obs, rewards, terminated, truncated, info = env.step(actions)
+            if render: env.render()
+            
+            # Update path length
+            for i in range(num_agents):
+                curr_p = env.agents[i].state[:3]
+                current_path_lengths[i] += np.linalg.norm(curr_p - last_positions[i])
+                last_positions[i] = curr_p.copy()
+            
+            done = terminated or truncated
+            ep_steps += 1
+
+        # Record Episode Results
+        if info.get('success'): successes += 1
+        if info.get('collision'): collisions += 1
+        
+        # Path Efficiency (Ideal / Actual)
+        for i in range(num_agents):
+            ideal = np.linalg.norm(env.goals[i] - start_positions[i])
+            path_lengths.append(current_path_lengths[i])
+            ideal_lengths.append(ideal)
+
+        print(f"Episode {ep+1}/{num_episodes} | Steps: {ep_steps} | Result: {'SUCCESS' if info.get('success') else 'FAILED'}")
+
+    # --- Generate Final Report ---
+    avg_success = (successes / num_episodes) * 100
+    avg_collision = (collisions / num_episodes) * 100
+    avg_latency = np.mean(latencies) * 1000 # ms
+    
+    # Avoid division by zero
+    valid_paths = [p for p in path_lengths if p > 0]
+    if valid_paths:
+        efficiency = np.mean(np.array(ideal_lengths) / np.array(path_lengths)) * 100
+    else:
+        efficiency = 0
+
+    print("\n" + "="*40)
+    print("FINAL PERFORMANCE REPORT (APF)")
+    print("="*40)
+    print(f"Success Rate:    {avg_success:.1f}%")
+    print(f"Collision Rate:  {avg_collision:.1f}%")
+    print(f"Path Efficiency: {efficiency:.1f}%")
+    print(f"Avg Latency:     {avg_latency:.3f} ms")
+    print("="*40)
+
+    # Save Plot
+    plt.figure(figsize=(10, 6))
+    metrics = ['Success Rate', 'Collision Rate', 'Path Efficiency']
+    values = [avg_success, avg_collision, efficiency]
+    plt.bar(metrics, values, color=['green', 'red', 'blue'])
+    plt.ylabel('Percentage (%)')
+    plt.title(f'Classical Baseline Performance: {scenario}')
+    plt.ylim(0, 100)
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.savefig('baseline_results.png')
+    print("\nResults chart saved as 'baseline_results.png'")
 
 if __name__ == "__main__":
-    import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--scenario', type=str, default='city')
-    parser.add_argument('--agents', type=int, default=3)
+    parser.add_argument("--scenario", type=str, default="city")
+    parser.add_argument("--agents", type=int, default=3)
+    parser.add_argument("--episodes", type=int, default=10)
+    parser.add_argument("--no_render", action="store_true")
     args = parser.parse_args()
     
-    run_apf_baseline(scenario=args.scenario, num_agents=args.agents)
+    run_apf_baseline(scenario=args.scenario, num_agents=args.agents, num_episodes=args.episodes, render=not args.no_render)
