@@ -5,7 +5,9 @@ import os
 import sys
 import numpy as np
 import torch
+import matplotlib.pyplot as plt
 from collections import deque
+import pandas as pd
 
 # Add the project root to the Python path so it can find 'envs' and 'agents'
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -62,6 +64,7 @@ def main():
             use_wandb = False
 
     os.makedirs(config['logging']['checkpoint_dir'], exist_ok=True)
+    os.makedirs(config['logging']['log_dir'], exist_ok=True)
 
     # Training Loop
     num_episodes = config['training']['num_episodes']
@@ -71,6 +74,12 @@ def main():
     
     recent_rewards = deque(maxlen=100)
     recent_success = deque(maxlen=100)
+    
+    # Academic Data Tracking
+    reward_history = []
+    success_history = []
+    
+    print(f"Starting training for {num_episodes} episodes...")
 
     for episode in range(1, num_episodes + 1):
         obs, _ = env.reset()
@@ -99,6 +108,9 @@ def main():
         recent_rewards.append(episode_reward)
         recent_success.append(1.0 if info.get('success', False) else 0.0)
         
+        reward_history.append(episode_reward)
+        success_history.append(1.0 if info.get('success', False) else 0.0)
+        
         epsilon = max(epsilon_end, epsilon * epsilon_decay)
         
         if episode % config['logging']['log_interval'] == 0:
@@ -124,7 +136,44 @@ def main():
     # Final save
     final_path = os.path.join(config['logging']['checkpoint_dir'], "mardpg_final.pt")
     agent.save(final_path, epsilon, num_episodes)
-    print("Training complete!")
+    
+    # --- ACADEMIC PLOTTING (Fig 8 Style) ---
+    print("Generating Academic Learning Curves...")
+    plt.figure(figsize=(10, 6))
+    plt.style.use('seaborn-v0_8-whitegrid')
+    
+    # Smooth the reward curve
+    window_size = 100
+    rewards_series = pd.Series(reward_history)
+    smooth_rewards = rewards_series.rolling(window=window_size).mean()
+    std_rewards = rewards_series.rolling(window=window_size).std()
+    
+    plt.plot(smooth_rewards, label='MARDPG (Mean Reward)', color='#c0392b', linewidth=2)
+    plt.fill_between(range(len(smooth_rewards)), 
+                     smooth_rewards - std_rewards, 
+                     smooth_rewards + std_rewards, 
+                     color='#c0392b', alpha=0.2, label='Std Dev')
+    
+    plt.title('Reward during all the training episodes', fontsize=14, fontweight='bold')
+    plt.xlabel('Number of history trajectories (Episodes)', fontsize=12)
+    plt.ylabel('Reward', fontsize=12)
+    plt.legend()
+    plt.grid(True, linestyle=':', alpha=0.6)
+    plt.savefig(os.path.join(config['logging']['log_dir'], 'learning_curve_reward.png'), dpi=300)
+    
+    # Success Rate Plot
+    plt.figure(figsize=(10, 6))
+    success_series = pd.Series(success_history)
+    smooth_success = success_series.rolling(window=window_size).mean()
+    plt.plot(smooth_success, color='#2ecc71', linewidth=2)
+    plt.title('Average Success Rate during Training', fontsize=14, fontweight='bold')
+    plt.xlabel('Episodes', fontsize=12)
+    plt.ylabel('Success Rate', fontsize=12)
+    plt.ylim(0, 1.1)
+    plt.grid(True, linestyle=':', alpha=0.6)
+    plt.savefig(os.path.join(config['logging']['log_dir'], 'learning_curve_success.png'), dpi=300)
+    
+    print(f"Training complete! Plots saved to {config['logging']['log_dir']}")
 
 if __name__ == '__main__':
     main()

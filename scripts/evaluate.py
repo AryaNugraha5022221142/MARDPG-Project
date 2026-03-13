@@ -5,6 +5,7 @@ import os
 import sys
 import numpy as np
 import torch
+import matplotlib.pyplot as plt
 
 # Add the project root to the Python path so it can find 'envs' and 'agents'
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -46,20 +47,35 @@ def main():
     collisions = 0
     times_to_goal = []
     
+    # Trajectory storage for plotting (first 5 episodes)
+    all_trajectories = []
+    
     for ep in range(args.episodes):
         obs, _ = env.reset()
         hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
         
         done = False
         steps = 0
+        ep_trajectories = [[] for _ in range(env.num_agents)]
         
         while not done:
             if args.render:
                 env.render()
+            
+            for i in range(env.num_agents):
+                ep_trajectories[i].append(env.agents[i].state[:3].copy())
+                
             actions, hidden = agent.select_actions(obs, hidden, epsilon=0.0) # Greedy
             obs, rewards, terminated, truncated, info = env.step(actions)
             done = terminated or truncated
             steps += 1
+            
+        if ep < 5: # Save first 5 episodes for plotting
+            all_trajectories.append({
+                'paths': ep_trajectories,
+                'goals': env.goals.copy(),
+                'obstacles': env.obstacles.copy()
+            })
             
         if args.render:
             env.render()
@@ -81,6 +97,50 @@ def main():
     print(f"Collision Rate: {collision_rate:.1f}%")
     print(f"Trapped Rate: {trapped_rate:.1f}%")
     print(f"Avg Time to Goal: {avg_time:.1f} steps")
+    
+    # --- ACADEMIC PLOTTING (Fig 4 Style) ---
+    print("\nGenerating Navigation Trajectory Plots...")
+    plt.figure(figsize=(12, 12))
+    plt.style.use('seaborn-v0_8-whitegrid')
+    
+    # Plot the first successful episode's trajectory
+    plot_ep = 0
+    for i, ep_data in enumerate(all_trajectories):
+        # Prefer plotting a success if available
+        plot_ep = i
+        break 
+
+    ep_data = all_trajectories[plot_ep]
+    
+    # Plot Obstacles
+    for obs_item in ep_data['obstacles']:
+        if obs_item['type'] == 'box':
+            rect = plt.Rectangle((obs_item['pos'][0]-obs_item['size'][0]/2, obs_item['pos'][1]-obs_item['size'][1]/2), 
+                                 obs_item['size'][0], obs_item['size'][1], color='gray', alpha=0.4)
+            plt.gca().add_patch(rect)
+        else:
+            circle = plt.Circle((obs_item['pos'][0], obs_item['pos'][1]), obs_item['radius'], color='gray', alpha=0.4)
+            plt.gca().add_patch(circle)
+            
+    # Plot Paths
+    colors = ['#c0392b', '#2980b9', '#27ae60', '#f39c12', '#8e44ad']
+    for i in range(env.num_agents):
+        path = np.array(ep_data['paths'][i])
+        plt.plot(path[:, 0], path[:, 1], color=colors[i % len(colors)], label=f'UAV {i+1}', linewidth=2.5)
+        plt.scatter(path[0, 0], path[0, 1], color='red', marker='o', s=100, label='Start' if i==0 else "")
+        plt.scatter(ep_data['goals'][i][0], ep_data['goals'][i][1], color='green', marker='*', s=250, label='Goal' if i==0 else "")
+
+    plt.xlim(0, env.arena_size[0])
+    plt.ylim(0, env.arena_size[1])
+    plt.title(f'Navigation Trajectories (MARDPG) - Evaluation Episode', fontsize=16, fontweight='bold')
+    plt.xlabel('X (m)', fontsize=14)
+    plt.ylabel('Y (m)', fontsize=14)
+    plt.legend(loc='upper right')
+    plt.grid(True, linestyle=':', alpha=0.6)
+    
+    output_path = os.path.join(config['logging']['log_dir'], 'evaluation_trajectories.png')
+    plt.savefig(output_path, dpi=300)
+    print(f"Trajectory plot saved to {output_path}")
     
     env.close()
 
