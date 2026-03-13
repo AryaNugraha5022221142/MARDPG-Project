@@ -48,6 +48,7 @@ class QuadcopterEnv:
         self.obstacles = []
         self.step_count = 0
         self.max_steps = 1000 # Increased for larger arena
+        self.prev_dist_to_goal = np.zeros(self.num_agents, dtype=np.float32)
     
     def _update_goals(self):
         """Updates goals based on arena size."""
@@ -121,6 +122,7 @@ class QuadcopterEnv:
             ])
             start_yaw = np.random.uniform(-np.pi, np.pi)
             self.agents[i].reset(start_pos, start_yaw)
+            self.prev_dist_to_goal[i] = np.linalg.norm(start_pos - self.goals[i])
             
         obs = self._get_observations()
         return obs, {}
@@ -293,11 +295,19 @@ class QuadcopterEnv:
             dist_to_goal = np.linalg.norm(pos - goal)
             d_min = self._get_min_distance(i)
             
-            # Rewards
-            r_transfer = -dist_to_goal * 0.1
+            # Rewards (Thesis Proposed)
+            # 1. Transfer Reward: Positive if moving closer, negative if moving away
+            r_transfer = 1.0 * (self.prev_dist_to_goal[i] - dist_to_goal)
+            self.prev_dist_to_goal[i] = dist_to_goal
+            
+            # 2. Collision Penalty: Exponential penalty based on distance to nearest obstacle
             r_collision = -100.0 * np.exp(-2.0 * max(d_min, 0.0))
+            
+            # 3. Free Space Reward: Encourages exploration of safe areas
             r_free_space = 0.5 if d_min > 2.0 else 0.0
-            r_step = -0.01
+            
+            # 4. Step Penalty: Constant penalty to prevent unproductive movements
+            r_step = -0.05 # Increased slightly to encourage efficiency
             
             rewards[i] = r_transfer + r_collision + r_free_space + r_step
             
