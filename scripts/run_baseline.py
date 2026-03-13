@@ -23,6 +23,10 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
     latencies = []
     path_lengths = []
     ideal_lengths = []
+    velocity_consistencies = []
+    
+    # Trajectory storage for plotting
+    trajectories = [[] for _ in range(num_agents)]
     
     print(f"\n=== Evaluating Classical Baseline (APF) ===")
     print(f"Scenario: {scenario} | Episodes: {num_episodes} | Agents: {num_agents}\n")
@@ -37,6 +41,9 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
         current_path_lengths = np.zeros(num_agents)
         last_positions = [p.copy() for p in start_positions]
         
+        # Velocity consistency for this episode
+        ep_velocities = []
+        
         # APF Hyperparameters
         k_att = 1.0
         k_rep = 50.0
@@ -47,8 +54,10 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
             
             # APF Logic
             actions = []
+            current_vels = []
             for i in range(num_agents):
                 agent_pos = env.agents[i].state[:3]
+                trajectories[i].append(agent_pos.copy())
                 goal_pos = env.goals[i]
                 
                 # 1. Attractive force
@@ -72,6 +81,7 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
                         f_rep += (dist_vec / np.linalg.norm(dist_vec)) * rep_mag
                 
                 f_total = f_att + f_rep
+                current_vels.append(f_total / (np.linalg.norm(f_total) + 1e-6))
                 
                 # Map force to discrete actions
                 if f_total[2] > 0.5: actions.append(3) # Up
@@ -85,6 +95,14 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
                     elif yaw_diff < -0.3: actions.append(2) # Left
                     else: actions.append(0) # Forward
             
+            # Calculate Velocity Consistency (Cosine Similarity between agents)
+            if num_agents > 1:
+                avg_vel = np.mean(current_vels, axis=0)
+                avg_vel_norm = np.linalg.norm(avg_vel)
+                if avg_vel_norm > 1e-6:
+                    consistencies = [np.dot(v, avg_vel) / (np.linalg.norm(v) * avg_vel_norm + 1e-6) for v in current_vels]
+                    ep_velocities.append(np.mean(consistencies))
+
             # Record Latency
             latencies.append(time.time() - start_time)
             
@@ -104,6 +122,7 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
         # Record Episode Results
         if info.get('success'): successes += 1
         if info.get('collision'): collisions += 1
+        if ep_velocities: velocity_consistencies.append(np.mean(ep_velocities))
         
         # Path Efficiency (Ideal / Actual)
         for i in range(num_agents):
@@ -114,16 +133,17 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
         print(f"Episode {ep+1}/{num_episodes} | Steps: {ep_steps} | Result: {'SUCCESS' if info.get('success') else 'FAILED'}")
 
     # --- Generate Final Report ---
-    avg_success = (successes / num_episodes) * 100
-    avg_collision = (collisions / num_episodes) * 100
+    avg_success = (successes / num_episodes)
+    avg_collision = (collisions / num_episodes)
     avg_latency = np.mean(latencies) * 1000 # ms
+    avg_v_cons = np.mean(velocity_consistencies) if velocity_consistencies else 0.0
     
     # Avoid division by zero and handle very short paths (collisions)
     valid_efficiencies = []
     for i in range(len(path_lengths)):
         if path_lengths[i] > 0.5: # Only count if the UAV actually moved
-            eff = (ideal_lengths[i] / path_lengths[i]) * 100
-            valid_efficiencies.append(min(eff, 100.0)) # Cap at 100%
+            eff = (ideal_lengths[i] / path_lengths[i])
+            valid_efficiencies.append(min(eff, 1.0)) # Cap at 100%
         else:
             valid_efficiencies.append(0.0)
             
@@ -132,23 +152,64 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
     print("\n" + "="*40)
     print("FINAL PERFORMANCE REPORT (APF)")
     print("="*40)
-    print(f"Success Rate:    {avg_success:.1f}%")
-    print(f"Collision Rate:  {avg_collision:.1f}%")
-    print(f"Path Efficiency: {efficiency:.1f}%")
+    print(f"Success Rate:    {avg_success*100:.1f}%")
+    print(f"Collision Rate:  {avg_collision*100:.1f}%")
+    print(f"Velocity Cons:   {avg_v_cons:.3f}")
+    print(f"Path Efficiency: {efficiency*100:.1f}%")
     print(f"Avg Latency:     {avg_latency:.3f} ms")
     print("="*40)
 
-    # Save Plot
-    plt.figure(figsize=(10, 6))
-    metrics = ['Success Rate', 'Collision Rate', 'Path Efficiency']
-    values = [avg_success, avg_collision, efficiency]
-    plt.bar(metrics, values, color=['green', 'red', 'blue'])
-    plt.ylabel('Percentage (%)')
-    plt.title(f'Classical Baseline Performance: {scenario}')
-    plt.ylim(0, 100)
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
-    plt.savefig('baseline_results.png')
-    print("\nResults chart saved as 'baseline_results.png'")
+    # --- ACADEMIC PLOTTING ---
+    # 1. Performance Bar Charts (Like Fig 3 in your image)
+    fig, axs = plt.subplots(1, 4, figsize=(20, 5))
+    plt.style.use('seaborn-v0_8-whitegrid')
+    
+    metrics = ['Success Rate', 'Collision Rate', 'Velocity Consistency', 'Path Efficiency']
+    values = [avg_success, avg_collision, avg_v_cons, efficiency]
+    colors = ['#2ecc71', '#e74c3c', '#3498db', '#f1c40f']
+    
+    for i in range(4):
+        axs[i].bar([scenario], [values[i]], color=colors[i], width=0.4, edgecolor='black', hatch='//')
+        axs[i].set_title(metrics[i], fontweight='bold')
+        axs[i].set_ylim(0, 1.1)
+        axs[i].grid(axis='y', linestyle='--', alpha=0.7)
+
+    plt.tight_layout()
+    plt.savefig('performance_metrics.png', dpi=300)
+    
+    # 2. Trajectory Tracking (Like Fig 4 in your image)
+    plt.figure(figsize=(10, 10))
+    # Plot Obstacles
+    for obs_item in env.obstacles:
+        if obs_item['type'] == 'box':
+            rect = plt.Rectangle((obs_item['pos'][0]-obs_item['size'][0]/2, obs_item['pos'][1]-obs_item['size'][1]/2), 
+                                 obs_item['size'][0], obs_item['size'][1], color='gray', alpha=0.5)
+            plt.gca().add_patch(rect)
+        else:
+            circle = plt.Circle((obs_item['pos'][0], obs_item['pos'][1]), obs_item['radius'], color='gray', alpha=0.5)
+            plt.gca().add_patch(circle)
+            
+    # Plot Paths
+    colors_agents = ['red', 'blue', 'green', 'orange', 'purple']
+    for i in range(num_agents):
+        path = np.array(trajectories[i])
+        if len(path) > 0:
+            plt.plot(path[:, 0], path[:, 1], color=colors_agents[i % len(colors_agents)], label=f'UAV {i+1}', linewidth=2)
+            plt.scatter(path[0, 0], path[0, 1], color='black', marker='o', s=50) # Start
+            plt.scatter(env.goals[i][0], env.goals[i][1], color='gold', marker='*', s=200) # Goal
+
+    plt.xlim(0, env.arena_size[0])
+    plt.ylim(0, env.arena_size[1])
+    plt.title(f'Trajectory Tracking: {scenario}', fontweight='bold')
+    plt.xlabel('X (m)')
+    plt.ylabel('Y (m)')
+    plt.legend()
+    plt.grid(True, linestyle=':', alpha=0.6)
+    plt.savefig('trajectory_tracking.png', dpi=300)
+    
+    print("\nAcademic reports saved:")
+    print("- 'performance_metrics.png' (Bar charts)")
+    print("- 'trajectory_tracking.png' (Path tracking)")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
