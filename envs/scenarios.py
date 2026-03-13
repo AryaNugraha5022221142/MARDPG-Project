@@ -61,6 +61,20 @@ def get_scenario_config(scenario_name: str) -> Dict[str, Any]:
         config['arena_size'] = [30.0, 20.0, 10.0]
         return config
         
+    elif scenario_name == 'basic_obstacles':
+        config = base_config.copy()
+        config['num_obstacles'] = 5
+        config['dynamic_ratio'] = 0.0
+        config['arena_size'] = [50.0, 50.0, 20.0]
+        return config
+        
+    elif scenario_name == 'single_obstacle':
+        config = base_config.copy()
+        config['num_obstacles'] = 1
+        config['dynamic_ratio'] = 0.0
+        config['arena_size'] = [40.0, 40.0, 20.0]
+        return config
+        
     return base_config
 
 def apply_scenario_custom_logic(env, scenario_name: str):
@@ -222,3 +236,35 @@ def apply_scenario_custom_logic(env, scenario_name: str):
                     'is_branch': True,
                     'alpha': 0.7
                 })
+
+    elif scenario_name == 'basic_obstacles':
+        # Simple pillars in the middle to test basic obstacle avoidance
+        pillar_positions = [
+            [25.0, 25.0, 10.0],
+            [15.0, 15.0, 10.0],
+            [35.0, 35.0, 10.0],
+            [15.0, 35.0, 10.0],
+            [35.0, 15.0, 10.0]
+        ]
+        for pos in pillar_positions:
+            p_pos = np.array(pos)
+            env.obstacles.append({
+                'type': 'box',
+                'pos': p_pos,
+                'size': np.array([4.0, 4.0, 20.0]),
+                'vel': np.zeros(3),
+                'origin': p_pos.copy(),
+                'color': '#34495e'
+            })
+
+    elif scenario_name == 'single_obstacle':
+        # One large block in the center
+        p_pos = np.array([20.0, 20.0, 10.0])
+        env.obstacles.append({
+            'type': 'box',
+            'pos': p_pos,
+            'size': np.array([10.0, 10.0, 20.0]),
+            'vel': np.zeros(3),
+            'origin': p_pos.copy(),
+            'color': '#c0392b'
+        })
