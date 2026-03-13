@@ -25,16 +25,19 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
     ideal_lengths = []
     velocity_consistencies = []
     
-    # Trajectory storage for plotting
-    trajectories = [[] for _ in range(num_agents)]
-    
     print(f"\n=== Evaluating Classical Baseline (APF) ===")
     print(f"Scenario: {scenario} | Episodes: {num_episodes} | Agents: {num_agents}\n")
 
+    # Trajectory storage for plotting
+    best_trajectory = None
+    
     for ep in range(num_episodes):
         obs, _ = env.reset()
         done = False
         ep_steps = 0
+        
+        # Track trajectory for this episode
+        ep_trajectories = [[] for _ in range(num_agents)]
         
         # Track path length
         start_positions = [agent.state[:3].copy() for agent in env.agents]
@@ -113,6 +116,7 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
             # Update path length
             for i in range(num_agents):
                 curr_p = env.agents[i].state[:3]
+                ep_trajectories[i].append(curr_p.copy())
                 current_path_lengths[i] += np.linalg.norm(curr_p - last_positions[i])
                 last_positions[i] = curr_p.copy()
             
@@ -120,9 +124,24 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
             ep_steps += 1
 
         # Record Episode Results
-        if info.get('success'): successes += 1
+        if info.get('success'): 
+            successes += 1
+            if best_trajectory is None:
+                best_trajectory = {
+                    'paths': ep_trajectories,
+                    'goals': [g.copy() for g in env.goals],
+                    'obstacles': [o.copy() for o in env.obstacles]
+                }
         if info.get('collision'): collisions += 1
         if ep_velocities: velocity_consistencies.append(np.mean(ep_velocities))
+
+        # If last episode and still no success, take the last one
+        if ep == num_episodes - 1 and best_trajectory is None:
+            best_trajectory = {
+                'paths': ep_trajectories,
+                'goals': [g.copy() for g in env.goals],
+                'obstacles': [o.copy() for o in env.obstacles]
+            }
         
         # Path Efficiency (Ideal / Actual)
         for i in range(num_agents):
@@ -180,7 +199,7 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
     # 2. Trajectory Tracking (Like Fig 4 in your image)
     plt.figure(figsize=(10, 10))
     # Plot Obstacles
-    for obs_item in env.obstacles:
+    for obs_item in best_trajectory['obstacles']:
         if obs_item['type'] == 'box':
             rect = plt.Rectangle((obs_item['pos'][0]-obs_item['size'][0]/2, obs_item['pos'][1]-obs_item['size'][1]/2), 
                                  obs_item['size'][0], obs_item['size'][1], color='gray', alpha=0.5)
@@ -192,11 +211,11 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
     # Plot Paths
     colors_agents = ['red', 'blue', 'green', 'orange', 'purple']
     for i in range(num_agents):
-        path = np.array(trajectories[i])
+        path = np.array(best_trajectory['paths'][i])
         if len(path) > 0:
             plt.plot(path[:, 0], path[:, 1], color=colors_agents[i % len(colors_agents)], label=f'UAV {i+1}', linewidth=2)
             plt.scatter(path[0, 0], path[0, 1], color='black', marker='o', s=50) # Start
-            plt.scatter(env.goals[i][0], env.goals[i][1], color='gold', marker='*', s=200) # Goal
+            plt.scatter(best_trajectory['goals'][i][0], best_trajectory['goals'][i][1], color='gold', marker='*', s=200) # Goal
 
     plt.xlim(0, env.arena_size[0])
     plt.ylim(0, env.arena_size[1])
