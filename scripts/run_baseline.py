@@ -68,7 +68,7 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
             current_vels = []
             for i in range(num_agents):
                 agent_pos = env.agents[i].state[:3]
-                trajectories[i].append(agent_pos.copy())
+                ep_trajectories[i].append(agent_pos.copy())
                 goal_pos = env.goals[i]
                 
                 # 1. Attractive force

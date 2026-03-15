@@ -47,6 +47,13 @@ def main():
     collisions = 0
     times_to_goal = []
     
+    # Advanced EE Metrics
+    all_jerks = []
+    all_safety_frontiers = []
+    agent_success_counts = np.zeros(env.num_agents)
+    path_lengths = []
+    ideal_lengths = []
+    
     # Trajectory storage for plotting (first 5 episodes)
     all_trajectories = []
     
@@ -82,14 +89,42 @@ def main():
             
         if info.get('success', False):
             successes += 1
+            agent_success_counts += 1 # Assuming all agents reached goal for success
             times_to_goal.append(steps)
         elif info.get('collision', False):
             collisions += 1
+            
+        # Collect EE Metrics
+        all_jerks.append(np.mean(env.total_jerk))
+        all_safety_frontiers.append(np.mean(env.safety_frontier))
+        
+        # Path Efficiency
+        for i in range(env.num_agents):
+            path_lengths.append(np.sum(np.linalg.norm(np.diff(np.array(ep_trajectories[i]), axis=0), axis=1)))
+            # Ideal distance from start to goal
+            ideal_lengths.append(np.linalg.norm(env.goals[i] - ep_trajectories[i][0]))
             
     success_rate = successes / args.episodes * 100
     collision_rate = collisions / args.episodes * 100
     trapped_rate = 100 - success_rate - collision_rate
     avg_time = np.mean(times_to_goal) if times_to_goal else 0
+    
+    # Calculate Fairness Index (Jain's Fairness Index)
+    agent_success_rates = agent_success_counts / args.episodes
+    fairness_index = (np.sum(agent_success_rates)**2) / (env.num_agents * np.sum(agent_success_rates**2) + 1e-8)
+    
+    avg_jerk = np.mean(all_jerks)
+    avg_safety = np.mean(all_safety_frontiers)
+    
+    # Path Efficiency
+    valid_efficiencies = []
+    for i in range(len(path_lengths)):
+        if path_lengths[i] > 0.5:
+            eff = (ideal_lengths[i] / path_lengths[i])
+            valid_efficiencies.append(min(eff, 1.0))
+        else:
+            valid_efficiencies.append(0.0)
+    avg_efficiency = np.mean(valid_efficiencies) if valid_efficiencies else 0.0
     
     print("=== Evaluation Results ===")
     print(f"Episodes: {args.episodes}")
@@ -97,6 +132,10 @@ def main():
     print(f"Collision Rate: {collision_rate:.1f}%")
     print(f"Trapped Rate: {trapped_rate:.1f}%")
     print(f"Avg Time to Goal: {avg_time:.1f} steps")
+    print(f"Path Efficiency: {avg_efficiency*100:.1f}%")
+    print(f"Fairness Index: {fairness_index:.3f}")
+    print(f"Avg Jerk (Smooth): {avg_jerk:.2f}")
+    print(f"Safety Frontier: {avg_safety:.2f} m")
     
     # --- ACADEMIC PLOTTING (Fig 4 Style) ---
     print("\nGenerating Navigation Trajectory Plots...")
