@@ -13,12 +13,13 @@ import pandas as pd
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from envs import QuadcopterEnv
-from agents import MARDPG
+from agents import MARDPG, MADDPG
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='config/config.yaml', help='Path to config file')
     parser.add_argument('--run-name', type=str, default='mardpg_run', help='Name of the run')
+    parser.add_argument('--agent', type=str, default='mardpg', choices=['mardpg', 'maddpg'], help='Agent type to train')
     parser.add_argument('--render', action='store_true', help='Enable 3D visualization during training')
     args = parser.parse_args()
 
@@ -42,13 +43,22 @@ def main():
     )
 
     # Agent
-    agent = MARDPG(
-        obs_dim=28, 
-        action_dim=6, 
-        num_agents=config['training']['num_agents'], 
-        config=config, 
-        device=device
-    )
+    if args.agent == 'mardpg':
+        agent = MARDPG(
+            obs_dim=28, 
+            action_dim=6, 
+            num_agents=config['training']['num_agents'], 
+            config=config, 
+            device=device
+        )
+    else:
+        agent = MADDPG(
+            obs_dim=28, 
+            action_dim=6, 
+            num_agents=config['training']['num_agents'], 
+            config=config, 
+            device=device
+        )
 
     # Logging
     use_wandb = config['logging'].get('use_wandb', False)
@@ -83,7 +93,8 @@ def main():
 
     for episode in range(1, num_episodes + 1):
         obs, _ = env.reset()
-        hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
+        if args.agent == 'mardpg':
+            hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
         
         episode_reward = 0
         done = False
@@ -92,7 +103,11 @@ def main():
             if args.render:
                 env.render()
                 
-            actions, hidden = agent.select_actions(obs, hidden, epsilon)
+            if args.agent == 'mardpg':
+                actions, hidden = agent.select_actions(obs, hidden, epsilon)
+            else:
+                actions = agent.select_actions(obs, epsilon)
+                
             next_obs, rewards, terminated, truncated, info = env.step(actions)
             
             done = terminated or truncated
@@ -127,14 +142,14 @@ def main():
                 })
                 
         if episode % config['logging']['save_interval'] == 0:
-            save_path = os.path.join(config['logging']['checkpoint_dir'], f"mardpg_ep{episode}.pt")
+            save_path = os.path.join(config['logging']['checkpoint_dir'], f"{args.agent}_ep{episode}.pt")
             agent.save(save_path, epsilon, episode)
             
     if args.render:
         env.close()
             
     # Final save
-    final_path = os.path.join(config['logging']['checkpoint_dir'], "mardpg_final.pt")
+    final_path = os.path.join(config['logging']['checkpoint_dir'], f"{args.agent}_final.pt")
     agent.save(final_path, epsilon, num_episodes)
     
     # --- ACADEMIC PLOTTING (Fig 8 Style) ---
@@ -148,30 +163,30 @@ def main():
     smooth_rewards = rewards_series.rolling(window=window_size).mean()
     std_rewards = rewards_series.rolling(window=window_size).std()
     
-    plt.plot(smooth_rewards, label='MARDPG (Mean Reward)', color='#c0392b', linewidth=2)
+    plt.plot(smooth_rewards, label=f'{args.agent.upper()} (Mean Reward)', color='#c0392b', linewidth=2)
     plt.fill_between(range(len(smooth_rewards)), 
                      smooth_rewards - std_rewards, 
                      smooth_rewards + std_rewards, 
                      color='#c0392b', alpha=0.2, label='Std Dev')
     
-    plt.title('Reward during all the training episodes', fontsize=14, fontweight='bold')
+    plt.title(f'Reward during all the training episodes ({args.agent.upper()})', fontsize=14, fontweight='bold')
     plt.xlabel('Number of history trajectories (Episodes)', fontsize=12)
     plt.ylabel('Reward', fontsize=12)
     plt.legend()
     plt.grid(True, linestyle=':', alpha=0.6)
-    plt.savefig(os.path.join(config['logging']['log_dir'], 'learning_curve_reward.png'), dpi=300)
+    plt.savefig(os.path.join(config['logging']['log_dir'], f'learning_curve_reward_{args.agent}.png'), dpi=300)
     
     # Success Rate Plot
     plt.figure(figsize=(10, 6))
     success_series = pd.Series(success_history)
     smooth_success = success_series.rolling(window=window_size).mean()
     plt.plot(smooth_success, color='#2ecc71', linewidth=2)
-    plt.title('Average Success Rate during Training', fontsize=14, fontweight='bold')
+    plt.title(f'Average Success Rate during Training ({args.agent.upper()})', fontsize=14, fontweight='bold')
     plt.xlabel('Episodes', fontsize=12)
     plt.ylabel('Success Rate', fontsize=12)
     plt.ylim(0, 1.1)
     plt.grid(True, linestyle=':', alpha=0.6)
-    plt.savefig(os.path.join(config['logging']['log_dir'], 'learning_curve_success.png'), dpi=300)
+    plt.savefig(os.path.join(config['logging']['log_dir'], f'learning_curve_success_{args.agent}.png'), dpi=300)
     
     print(f"Training complete! Plots saved to {config['logging']['log_dir']}")
 

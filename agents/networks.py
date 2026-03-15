@@ -55,6 +55,32 @@ class ActorLSTM(nn.Module):
         
         return logits, hidden
 
+class Actor(nn.Module):
+    """
+    Standard MLP-based Actor network shared across all agents.
+    """
+    def __init__(self, input_dim: int = 28, hidden_dim: int = 256, output_dim: int = 6, dropout: float = 0.2):
+        super(Actor, self).__init__()
+        
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.dropout1 = nn.Dropout(dropout)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.dropout2 = nn.Dropout(dropout)
+        self.fc3 = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass.
+        x: (batch_size, input_dim)
+        """
+        x = F.relu(self.fc1(x))
+        x = self.dropout1(x)
+        x = F.relu(self.fc2(x))
+        x = self.dropout2(x)
+        logits = self.fc3(x)
+        
+        return logits
+
 class Critic(nn.Module):
     """
     Centralized Critic network for a single agent.
