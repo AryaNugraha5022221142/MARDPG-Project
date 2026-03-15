@@ -107,11 +107,20 @@ class QuadcopterEnv:
                 if valid:
                     self.obstacles.append({'type': 'box', 'pos': pos, 'size': size, 'vel': vel, 'origin': pos.copy()})
 
-    def reset(self) -> Tuple[np.ndarray, Dict[str, Any]]:
+    def reset(self, seed=None) -> Tuple[np.ndarray, Dict[str, Any]]:
         """Resets the environment and returns initial observations."""
+        if seed is not None:
+            np.random.seed(seed)
+            
         self.step_count = 0
         self._generate_obstacles()
         self._update_goals() # Refresh goals for variety
+        
+        # Reset metrics
+        self.total_jerk = np.zeros(self.num_agents, dtype=np.float32)
+        self.safety_frontier = np.ones(self.num_agents, dtype=np.float32) * float('inf')
+        self.prev_accel = np.zeros((self.num_agents, 3), dtype=np.float32)
+        self.prev_vel = np.zeros((self.num_agents, 3), dtype=np.float32)
         
         # Random start positions on the "left" side
         for i in range(self.num_agents):
@@ -277,7 +286,17 @@ class QuadcopterEnv:
             vx_world = cmd[0] * np.cos(yaw) - cmd[1] * np.sin(yaw)
             vy_world = cmd[0] * np.sin(yaw) + cmd[1] * np.cos(yaw)
             world_cmd = np.array([vx_world, vy_world, cmd[2], cmd[3]])
+            
+            # Track dynamics for Jerk calculation
+            old_vel = self.agents[i].state[3:6].copy()
             self.agents[i].step(world_cmd)
+            new_vel = self.agents[i].state[3:6]
+            
+            # Jerk calculation: da/dt
+            accel = (new_vel - old_vel) / self.dt
+            jerk = np.linalg.norm(accel - self.prev_accel[i]) / self.dt
+            self.total_jerk[i] += jerk
+            self.prev_accel[i] = accel.copy()
             
         obs = self._get_observations()
         rewards = np.zeros(self.num_agents, dtype=np.float32)
@@ -317,6 +336,9 @@ class QuadcopterEnv:
             if d_min < self.collision_dist:
                 terminated = True
                 info['collision'] = True
+            
+            # Update safety frontier
+            self.safety_frontier[i] = min(self.safety_frontier[i], d_min)
                 
         if success_count == self.num_agents:
             terminated = True

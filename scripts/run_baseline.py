@@ -11,10 +11,13 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from envs.quadcopter_env import QuadcopterEnv
 
-def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True):
+def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True, seed=42):
     """
     Runs the APF baseline and collects performance metrics.
     """
+    if seed is not None:
+        np.random.seed(seed)
+        
     env = QuadcopterEnv(num_agents=num_agents, render_mode='human' if render else None, scenario=scenario)
     
     # Metrics storage
@@ -25,8 +28,13 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
     ideal_lengths = []
     velocity_consistencies = []
     
+    # Advanced EE Metrics
+    all_jerks = []
+    all_safety_frontiers = []
+    agent_success_counts = np.zeros(num_agents)
+    
     print(f"\n=== Evaluating Classical Baseline (APF) ===")
-    print(f"Scenario: {scenario} | Episodes: {num_episodes} | Agents: {num_agents}\n")
+    print(f"Scenario: {scenario} | Episodes: {num_episodes} | Agents: {num_agents} | Seed: {seed}\n")
 
     # Trajectory storage for plotting
     best_trajectory = None
@@ -126,6 +134,7 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
         # Record Episode Results
         if info.get('success'): 
             successes += 1
+            agent_success_counts += 1 # In APF, if success, all agents reached goal
             if best_trajectory is None:
                 best_trajectory = {
                     'paths': ep_trajectories,
@@ -134,6 +143,10 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
                 }
         if info.get('collision'): collisions += 1
         if ep_velocities: velocity_consistencies.append(np.mean(ep_velocities))
+        
+        # Collect EE Metrics
+        all_jerks.append(np.mean(env.total_jerk))
+        all_safety_frontiers.append(np.mean(env.safety_frontier))
 
         # If last episode and still no success, take the last one
         if ep == num_episodes - 1 and best_trajectory is None:
@@ -167,14 +180,23 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
             valid_efficiencies.append(0.0)
             
     efficiency = np.mean(valid_efficiencies) if valid_efficiencies else 0.0
+    
+    # Calculate Fairness Index (Jain's Fairness Index on agent success rates)
+    agent_success_rates = agent_success_counts / num_episodes
+    fairness_index = (np.sum(agent_success_rates)**2) / (num_agents * np.sum(agent_success_rates**2) + 1e-8)
+    
+    avg_jerk = np.mean(all_jerks)
+    avg_safety = np.mean(all_safety_frontiers)
 
     print("\n" + "="*40)
     print("FINAL PERFORMANCE REPORT (APF)")
     print("="*40)
     print(f"Success Rate:    {avg_success*100:.1f}%")
     print(f"Collision Rate:  {avg_collision*100:.1f}%")
-    print(f"Velocity Cons:   {avg_v_cons:.3f}")
     print(f"Path Efficiency: {efficiency*100:.1f}%")
+    print(f"Fairness Index:  {fairness_index:.3f}")
+    print(f"Avg Jerk (Smooth): {avg_jerk:.2f}")
+    print(f"Safety Frontier: {avg_safety:.2f} m")
     print(f"Avg Latency:     {avg_latency:.3f} ms")
     print("="*40)
 
@@ -235,7 +257,8 @@ if __name__ == "__main__":
     parser.add_argument("--scenario", type=str, default="city")
     parser.add_argument("--agents", type=int, default=3)
     parser.add_argument("--episodes", type=int, default=10)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--no_render", action="store_true")
     args = parser.parse_args()
     
-    run_apf_baseline(scenario=args.scenario, num_agents=args.agents, num_episodes=args.episodes, render=not args.no_render)
+    run_apf_baseline(scenario=args.scenario, num_agents=args.agents, num_episodes=args.episodes, render=not args.no_render, seed=args.seed)

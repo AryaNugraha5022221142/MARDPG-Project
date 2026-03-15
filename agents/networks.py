@@ -8,14 +8,16 @@ class ActorLSTM(nn.Module):
     """
     LSTM-based Actor network shared across all agents.
     """
-    def __init__(self, input_dim: int = 28, hidden_dim: int = 128, num_layers: int = 1, output_dim: int = 6):
+    def __init__(self, input_dim: int = 28, hidden_dim: int = 128, num_layers: int = 1, output_dim: int = 6, dropout: float = 0.2):
         super(ActorLSTM, self).__init__()
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
         
         self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True)
         self.fc1 = nn.Linear(hidden_dim, 256)
+        self.dropout1 = nn.Dropout(dropout)
         self.fc2 = nn.Linear(256, 128)
+        self.dropout2 = nn.Dropout(dropout)
         self.fc3 = nn.Linear(128, output_dim)
 
     def init_hidden(self, batch_size: int = 1, device: str = 'cpu') -> Tuple[torch.Tensor, torch.Tensor]:
@@ -46,7 +48,9 @@ class ActorLSTM(nn.Module):
             pass
             
         x = F.relu(self.fc1(out))
+        x = self.dropout1(x)
         x = F.relu(self.fc2(x))
+        x = self.dropout2(x)
         logits = self.fc3(x)
         
         return logits, hidden
@@ -55,15 +59,17 @@ class Critic(nn.Module):
     """
     Centralized Critic network for a single agent.
     """
-    def __init__(self, obs_dim: int = 28, action_dim: int = 6, num_agents: int = 3):
+    def __init__(self, obs_dim: int = 28, action_dim: int = 6, num_agents: int = 3, dropout: float = 0.2):
         super(Critic, self).__init__()
         
         input_dim = (obs_dim * num_agents) + (action_dim * num_agents)
         
         self.fc1 = nn.Linear(input_dim, 512)
         self.bn1 = nn.BatchNorm1d(512)
+        self.dropout1 = nn.Dropout(dropout)
         self.fc2 = nn.Linear(512, 256)
         self.bn2 = nn.BatchNorm1d(256)
+        self.dropout2 = nn.Dropout(dropout)
         self.fc3 = nn.Linear(256, 128)
         self.fc4 = nn.Linear(128, 1)
         
@@ -95,11 +101,13 @@ class Critic(nn.Module):
         if batch_size > 1:
             x = self.bn1(x)
         x = F.relu(x)
+        x = self.dropout1(x)
         
         x = self.fc2(x)
         if batch_size > 1:
             x = self.bn2(x)
         x = F.relu(x)
+        x = self.dropout2(x)
         
         x = F.relu(self.fc3(x))
         q_value = self.fc4(x)

@@ -9,6 +9,15 @@ import copy
 from .networks import ActorLSTM, Critic
 from .replay_buffer import ReplayBuffer
 
+class GaussianNoise:
+    def __init__(self, action_dim, mu=0.0, sigma=0.1):
+        self.mu = mu
+        self.sigma = sigma
+        self.action_dim = action_dim
+
+    def sample(self):
+        return np.random.normal(self.mu, self.sigma, self.action_dim)
+
 class MARDPG:
     """
     Multi-Agent Recurrent Deterministic Policy Gradient (MARDPG)
@@ -37,13 +46,17 @@ class MARDPG:
         # Shared Actor
         hidden_dim = config['network']['actor'].get('hidden_dim', 128)
         lstm_layers = config['network']['actor'].get('lstm_layers', 1)
+        dropout = config['network'].get('dropout', 0.2)
         
-        self.actor = ActorLSTM(obs_dim, hidden_dim, lstm_layers, action_dim).to(self.device)
+        self.actor = ActorLSTM(obs_dim, hidden_dim, lstm_layers, action_dim, dropout=dropout).to(self.device)
         self.actor_target = copy.deepcopy(self.actor).to(self.device)
         
         # Critics (one per agent)
-        self.critics = [Critic(obs_dim, action_dim, num_agents).to(self.device) for _ in range(num_agents)]
+        self.critics = [Critic(obs_dim, action_dim, num_agents, dropout=dropout).to(self.device) for _ in range(num_agents)]
         self.critics_target = copy.deepcopy(self.critics)
+        
+        # Noise
+        self.noise = GaussianNoise(action_dim, sigma=config.get('noise_sigma', 0.1))
         
         # Optimizers
         actor_lr = config['learning'].get('actor_lr', 1e-4)
@@ -75,10 +88,12 @@ class MARDPG:
                 logits, (new_h, new_c) = self.actor(obs_tensor, (h, c))
                 new_hidden.append((new_h, new_c))
                 
-                if np.random.rand() < epsilon:
-                    action = np.random.randint(self.action_dim)
-                else:
-                    action = torch.argmax(logits, dim=1).item()
+                # Apply Gaussian Noise to Logits for exploration
+                if epsilon > 0:
+                    noise = torch.FloatTensor(self.noise.sample()).to(self.device) * epsilon
+                    logits = logits + noise
+                
+                action = torch.argmax(logits, dim=1).item()
                 actions.append(action)
                 
         self.actor.train()
