@@ -6,23 +6,34 @@ import numpy as np
 from typing import List, Tuple, Dict, Any
 import copy
 
-from .networks import ActorLSTM, Critic
-from .replay_buffer import ReplayBuffer
+from .networks import ActorLSTM, CriticLSTM
+from .replay_buffer import SequenceReplayBuffer
 
-class GaussianNoise:
-    def __init__(self, action_dim, mu=0.0, sigma=0.1):
-        self.mu = mu
-        self.sigma = sigma
+class OrnsteinUhlenbeckNoise:
+    """
+    OU Noise for continuous action exploration.
+    """
+    def __init__(self, action_dim, mu=0.0, theta=0.15, sigma=0.2):
         self.action_dim = action_dim
+        self.mu = mu
+        self.theta = theta
+        self.sigma = sigma
+        self.state = np.ones(self.action_dim) * self.mu
+
+    def reset(self):
+        self.state = np.ones(self.action_dim) * self.mu
 
     def sample(self):
-        return np.random.normal(self.mu, self.sigma, self.action_dim)
+        x = self.state
+        dx = self.theta * (self.mu - x) + self.sigma * np.random.randn(len(x))
+        self.state = x + dx
+        return self.state
 
 class MARDPG:
     """
     Multi-Agent Recurrent Deterministic Policy Gradient (MARDPG)
     """
-    def __init__(self, obs_dim: int = 28, action_dim: int = 6, num_agents: int = 3, 
+    def __init__(self, obs_dim: int = 32, action_dim: int = 4, num_agents: int = 3, 
                  config: Dict[str, Any] = None, device: str = 'cpu'):
         self.obs_dim = obs_dim
         self.action_dim = action_dim
@@ -33,30 +44,30 @@ class MARDPG:
             config = {
                 'network': {'actor': {'hidden_dim': 128, 'lstm_layers': 1}},
                 'learning': {'actor_lr': 1e-4, 'critic_lr': 1e-3, 'max_grad_norm': 1.0},
-                'memory': {'buffer_size': 100000, 'batch_size': 128},
+                'memory': {'buffer_size': 1000, 'batch_size': 32, 'seq_len': 16},
                 'targets': {'update_rate': 0.01}
             }
         self.config = config
         
         self.gamma = 0.99
         self.tau = config['targets'].get('update_rate', 0.01)
-        self.batch_size = config['memory'].get('batch_size', 128)
+        self.batch_size = config['memory'].get('batch_size', 32)
+        self.seq_len = config['memory'].get('seq_len', 16)
         self.max_grad_norm = config['learning'].get('max_grad_norm', 1.0)
         
         # Shared Actor
         hidden_dim = config['network']['actor'].get('hidden_dim', 128)
         lstm_layers = config['network']['actor'].get('lstm_layers', 1)
-        dropout = config['network'].get('dropout', 0.2)
         
-        self.actor = ActorLSTM(obs_dim, hidden_dim, lstm_layers, action_dim, dropout=dropout).to(self.device)
+        self.actor = ActorLSTM(obs_dim, hidden_dim, lstm_layers, action_dim).to(self.device)
         self.actor_target = copy.deepcopy(self.actor).to(self.device)
         
-        # Critics (one per agent)
-        self.critics = [Critic(obs_dim, action_dim, num_agents, dropout=dropout).to(self.device) for _ in range(num_agents)]
-        self.critics_target = copy.deepcopy(self.critics)
+        # Centralized Critics (one per agent, but each sees all agents)
+        self.critics = [CriticLSTM(obs_dim, action_dim, num_agents, hidden_dim, lstm_layers).to(self.device) for _ in range(num_agents)]
+        self.critics_target = [copy.deepcopy(c).to(self.device) for c in self.critics]
         
-        # Noise
-        self.noise = GaussianNoise(action_dim, sigma=config.get('noise_sigma', 0.1))
+        # Noise (OU for continuous)
+        self.noise = [OrnsteinUhlenbeckNoise(action_dim) for _ in range(num_agents)]
         
         # Optimizers
         actor_lr = config['learning'].get('actor_lr', 1e-4)
@@ -66,13 +77,13 @@ class MARDPG:
         self.critic_optimizers = [optim.Adam(critic.parameters(), lr=critic_lr) for critic in self.critics]
         
         # Replay Buffer
-        buffer_size = config['memory'].get('buffer_size', 100000)
-        self.memory = ReplayBuffer(buffer_size)
+        buffer_size = config['memory'].get('buffer_size', 1000)
+        self.memory = SequenceReplayBuffer(buffer_size)
 
     def select_actions(self, obs: np.ndarray, hidden: List[Tuple[torch.Tensor, torch.Tensor]], 
-                       epsilon: float = 0.0) -> Tuple[List[int], List[Tuple[torch.Tensor, torch.Tensor]]]:
+                       noise_scale: float = 0.1) -> Tuple[np.ndarray, List[Tuple[torch.Tensor, torch.Tensor]]]:
         """
-        Selects actions for all agents using epsilon-greedy policy.
+        Selects continuous actions for all agents.
         obs: (num_agents, obs_dim)
         hidden: list of (h, c) for each agent
         """
@@ -85,68 +96,64 @@ class MARDPG:
                 obs_tensor = torch.FloatTensor(obs[i]).unsqueeze(0).to(self.device) # (1, obs_dim)
                 h, c = hidden[i]
                 
-                logits, (new_h, new_c) = self.actor(obs_tensor, (h, c))
+                # Actor returns (batch, 1, action_dim) for single step
+                action, (new_h, new_c) = self.actor(obs_tensor, (h, c))
                 new_hidden.append((new_h, new_c))
                 
-                # Apply Gaussian Noise to Logits for exploration
-                if epsilon > 0:
-                    noise = torch.FloatTensor(self.noise.sample()).to(self.device) * epsilon
-                    logits = logits + noise
+                action = action.cpu().numpy().flatten()
                 
-                action = torch.argmax(logits, dim=1).item()
+                # Add OU Noise
+                if noise_scale > 0:
+                    action += self.noise[i].sample() * noise_scale
+                
+                action = np.clip(action, -1.0, 1.0)
                 actions.append(action)
                 
         self.actor.train()
-        return actions, new_hidden
+        return np.array(actions), new_hidden
 
     def update(self) -> Dict[str, float]:
         """
-        Performs one training step.
+        Performs one training step using BPTT on sequences.
         """
         if len(self.memory) < self.batch_size:
             return {}
             
-        # Sample batch
-        obs_batch, actions_batch, rewards_batch, next_obs_batch, dones_batch = self.memory.sample(self.batch_size)
+        # Sample batch of sequences: (batch, seq_len, num_agents, dim)
+        obs_seq, act_seq, rew_seq, nobs_seq, done_seq = self.memory.sample(self.batch_size, self.seq_len)
         
         # Convert to tensors
-        obs = torch.FloatTensor(obs_batch).to(self.device)           # (batch, num_agents, obs_dim)
-        actions = torch.LongTensor(actions_batch).to(self.device)    # (batch, num_agents)
-        rewards = torch.FloatTensor(rewards_batch).to(self.device)   # (batch, num_agents)
-        next_obs = torch.FloatTensor(next_obs_batch).to(self.device) # (batch, num_agents, obs_dim)
-        dones = torch.FloatTensor(dones_batch).to(self.device)       # (batch, num_agents)
-        
-        # Actions one-hot
-        actions_onehot = F.one_hot(actions, self.action_dim).float() # (batch, num_agents, action_dim)
+        obs = torch.FloatTensor(obs_seq).to(self.device)
+        actions = torch.FloatTensor(act_seq).to(self.device)
+        rewards = torch.FloatTensor(rew_seq).to(self.device)
+        next_obs = torch.FloatTensor(nobs_seq).to(self.device)
+        dones = torch.FloatTensor(done_seq).to(self.device)
         
         # 1. Update Critics
         critic_losses = []
+        
+        # Target actions for next_obs
         with torch.no_grad():
-            # Get next actions from target actor
-            next_actions_logits = []
+            next_actions_all = []
             for i in range(self.num_agents):
-                # We treat each agent's sequence independently for the actor target
-                # Since we don't store sequences in this basic buffer, we just pass single steps
-                # and init hidden states to zero. For a true recurrent buffer, we'd sample sequences.
-                # Here we simplify by passing the batch of next_obs for agent i.
-                agent_next_obs = next_obs[:, i, :] # (batch, obs_dim)
-                logits, _ = self.actor_target(agent_next_obs, None)
-                next_actions_logits.append(logits)
-                
-            next_actions_logits = torch.stack(next_actions_logits, dim=1) # (batch, num_agents, action_dim)
-            next_actions = torch.argmax(next_actions_logits, dim=-1) # (batch, num_agents)
-            next_actions_onehot = F.one_hot(next_actions, self.action_dim).float()
+                # Actor target needs (batch, seq_len, obs_dim)
+                agent_next_obs = next_obs[:, :, i, :]
+                next_act, _ = self.actor_target(agent_next_obs, None)
+                next_actions_all.append(next_act)
+            next_actions_all = torch.stack(next_actions_all, dim=2) # (batch, seq_len, num_agents, action_dim)
             
         for i in range(self.num_agents):
             # Target Q
             with torch.no_grad():
-                target_q = self.critics_target[i](next_obs, next_actions_onehot).squeeze(-1) # (batch,)
-                target_q = rewards[:, i] + self.gamma * target_q * (1 - dones[:, i])
+                target_q_seq, _ = self.critics_target[i](next_obs, next_actions_all, None)
+                target_q_seq = target_q_seq.squeeze(-1) # (batch, seq_len)
+                target_q = rewards[:, :, i] + self.gamma * target_q_seq * (1 - dones[:, :, i])
                 
             # Current Q
-            current_q = self.critics[i](obs, actions_onehot).squeeze(-1) # (batch,)
+            current_q_seq, _ = self.critics[i](obs, actions, None)
+            current_q = current_q_seq.squeeze(-1) # (batch, seq_len)
             
-            # Critic loss
+            # Critic loss (MSE over sequence)
             critic_loss = F.mse_loss(current_q, target_q)
             critic_losses.append(critic_loss.item())
             
@@ -157,21 +164,18 @@ class MARDPG:
             self.critic_optimizers[i].step()
             
         # 2. Update Actor
-        # Forward pass for all agents
-        actor_logits = []
+        # We need to compute gradients through the critic
+        actor_actions_all = []
         for i in range(self.num_agents):
-            agent_obs = obs[:, i, :]
-            logits, _ = self.actor(agent_obs, None)
-            actor_logits.append(logits)
-            
-        actor_logits = torch.stack(actor_logits, dim=1) # (batch, num_agents, action_dim)
-        actor_probs = F.softmax(actor_logits, dim=-1) # (batch, num_agents, action_dim)
+            agent_obs = obs[:, :, i, :]
+            act, _ = self.actor(agent_obs, None)
+            actor_actions_all.append(act)
+        actor_actions_all = torch.stack(actor_actions_all, dim=2) # (batch, seq_len, num_agents, action_dim)
         
         actor_loss = 0
         for i in range(self.num_agents):
-            # The critic expects one-hot actions, we pass probabilities for differentiability (Gumbel-Softmax alternative)
-            # In MADDPG, we can pass the continuous relaxation
-            q_values = self.critics[i](obs, actor_probs)
+            # Centralized critic evaluation
+            q_values, _ = self.critics[i](obs, actor_actions_all, None)
             actor_loss += -q_values.mean()
             
         self.actor_optimizer.zero_grad()

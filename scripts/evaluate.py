@@ -33,8 +33,8 @@ def main():
     )
     
     agent = MARDPG(
-        obs_dim=28, 
-        action_dim=6, 
+        obs_dim=32, 
+        action_dim=4, 
         num_agents=config['training']['num_agents'], 
         config=config, 
         device=device
@@ -72,7 +72,7 @@ def main():
             for i in range(env.num_agents):
                 ep_trajectories[i].append(env.agents[i].state[:3].copy())
                 
-            actions, hidden = agent.select_actions(obs, hidden, epsilon=0.0) # Greedy
+            actions, hidden = agent.select_actions(obs, hidden, noise_scale=0.0) # Greedy
             obs, rewards, terminated, truncated, info = env.step(actions)
             done = terminated or truncated
             steps += 1

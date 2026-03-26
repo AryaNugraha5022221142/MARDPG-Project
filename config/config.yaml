@@ -25,9 +25,9 @@ learning:
   max_grad_norm: 1.0
 
 memory:
-  buffer_size: 100000
-  batch_size: 128
-  seq_length: 16
+  buffer_size: 1000
+  batch_size: 32
+  seq_len: 16
 
 targets:
   update_rate: 0.01
@@ -35,10 +35,10 @@ targets:
 
 rewards:
   weights:
-    transfer: 1.0
+    transfer: 2.0
     collision: 100.0
-    free_space: 0.5
-    step_penalty: 0.01
+    smoothness: 0.01
+    step_penalty: 0.1
   goal_bonus: 100.0
   collision_penalty: -50.0
 
@@ -47,7 +47,7 @@ logging:
   save_interval: 500
   log_dir: "./logs"
   checkpoint_dir: "./checkpoints"
-  use_wandb: true
+  use_wandb: false # Set to false by default to avoid import errors
   wandb_project: "mardpg-thesis"
 
 evaluation:
@@ -55,10 +55,11 @@ evaluation:
   eval_interval: 500
 
 environment:
-  arena_size: [20, 20, 10]
-  num_obstacles: 30
+  arena_size: [100, 100, 40]
+  num_obstacles: 25
   max_velocity: 5.0
-  rangefinder_max_range: 15.0
-  collision_distance: 0.5
-  goal_distance: 1.0
+  rangefinder_max_range: 30.0
+  collision_distance: 0.8
+  goal_distance: 2.0
   dt: 0.01
+  dynamic_ratio: 0.3

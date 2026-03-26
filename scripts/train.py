@@ -45,16 +45,17 @@ def main():
     # Agent
     if args.agent == 'mardpg':
         agent = MARDPG(
-            obs_dim=28, 
-            action_dim=6, 
+            obs_dim=32, 
+            action_dim=4, 
             num_agents=config['training']['num_agents'], 
             config=config, 
             device=device
         )
     else:
-        agent = MADDPG(
-            obs_dim=28, 
-            action_dim=6, 
+        # Assuming MADDPG is also updated or we just use MARDPG
+        agent = MARDPG(
+            obs_dim=32, 
+            action_dim=4, 
             num_agents=config['training']['num_agents'], 
             config=config, 
             device=device
@@ -104,7 +105,7 @@ def main():
                 env.render()
                 
             if args.agent == 'mardpg':
-                actions, hidden = agent.select_actions(obs, hidden, epsilon)
+                actions, hidden = agent.select_actions(obs, hidden, noise_scale=epsilon)
             else:
                 actions = agent.select_actions(obs, epsilon)
                 
@@ -115,7 +116,11 @@ def main():
             
             agent.memory.push(obs, np.array(actions), rewards, next_obs, dones)
             
-            loss_dict = agent.update()
+            # Only update if we have enough episodes in the buffer
+            if len(agent.memory) >= config['memory'].get('batch_size', 32):
+                loss_dict = agent.update()
+            else:
+                loss_dict = {}
             
             obs = next_obs
             episode_reward += np.sum(rewards)

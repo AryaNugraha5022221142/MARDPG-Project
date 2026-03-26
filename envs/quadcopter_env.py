@@ -49,6 +49,13 @@ class QuadcopterEnv:
         self.step_count = 0
         self.max_steps = 1000 # Increased for larger arena
         self.prev_dist_to_goal = np.zeros(self.num_agents, dtype=np.float32)
+        
+        # Reward weights from config
+        self.reward_config = config.get('rewards', {
+            'weights': {'transfer': 2.0, 'collision': 100.0, 'smoothness': 0.01, 'step_penalty': 0.1},
+            'goal_bonus': 100.0,
+            'collision_penalty': -50.0
+        })
     
     def _update_goals(self):
         """Updates goals based on arena size."""
@@ -80,6 +87,8 @@ class QuadcopterEnv:
             obs_type = np.random.choice(['sphere', 'box'])
             is_dynamic = np.random.random() < self.dynamic_ratio
             vel = np.random.uniform(-1.0, 1.0, size=3) if is_dynamic else np.zeros(3)
+            phase = np.random.uniform(0, 2 * np.pi) if is_dynamic else 0.0
+            freq = np.random.uniform(0.02, 0.08) if is_dynamic else 0.0
             
             if obs_type == 'sphere':
                 radius = np.random.uniform(0.5, 1.5)
@@ -93,7 +102,10 @@ class QuadcopterEnv:
                         if np.linalg.norm(pos - obs['pos']) < (radius + np.max(obs['size']) + 1.0):
                             valid = False; break
                 if valid:
-                    self.obstacles.append({'type': 'sphere', 'pos': pos, 'radius': radius, 'vel': vel, 'origin': pos.copy()})
+                    self.obstacles.append({
+                        'type': 'sphere', 'pos': pos, 'radius': radius, 
+                        'vel': vel, 'origin': pos.copy(), 'phase': phase, 'freq': freq
+                    })
             else:
                 size = np.random.uniform(0.5, 2.0, size=3)
                 valid = True
@@ -105,7 +117,10 @@ class QuadcopterEnv:
                         if np.linalg.norm(pos - obs['pos']) < (np.max(size) + np.max(obs['size']) + 1.0):
                             valid = False; break
                 if valid:
-                    self.obstacles.append({'type': 'box', 'pos': pos, 'size': size, 'vel': vel, 'origin': pos.copy()})
+                    self.obstacles.append({
+                        'type': 'box', 'pos': pos, 'size': size, 
+                        'vel': vel, 'origin': pos.copy(), 'phase': phase, 'freq': freq
+                    })
 
     def reset(self, seed=None) -> Tuple[np.ndarray, Dict[str, Any]]:
         """Resets the environment and returns initial observations."""
@@ -146,9 +161,13 @@ class QuadcopterEnv:
             goal = self.goals[i]
             
             # Rangefinder (5x5 grid)
+            # 1. Rangefinder with Noise (Sim-to-Real)
             h_angles = np.deg2rad(np.array([-60, -30, 0, 30, 60]))
             v_angles = np.deg2rad(np.array([-30, -15, 0, 15, 30]))
             ranges = np.ones(25, dtype=np.float32) * self.max_range
+            
+            # Add 2% Gaussian noise to sensors
+            sensor_noise = np.random.normal(0, 0.02 * self.max_range, 25)
             
             idx = 0
             for ha in h_angles:
@@ -212,10 +231,12 @@ class QuadcopterEnv:
                             
                     ranges[idx] = min_dist
                     idx += 1
-                    
+            
+            # Apply noise and clip
+            ranges = np.clip(ranges + sensor_noise, 0, self.max_range)
             ranges_norm = ranges / self.max_range
             
-            # Goal info
+            # 2. Goal info (Relative)
             rel_pos = goal - pos
             dist_to_goal = np.linalg.norm(rel_pos)
             dist_norm = dist_to_goal / self.arena_diagonal
@@ -227,7 +248,11 @@ class QuadcopterEnv:
             phi_goal = np.arctan2(rel_pos[2], np.sqrt(rel_pos[0]**2 + rel_pos[1]**2))
             sin_phi = np.sin(phi_goal)
             
-            obs = np.concatenate([ranges_norm, [dist_norm, sin_theta, cos_theta, sin_phi]])[:28]
+            # 3. Velocity Info (Crucial for momentum awareness)
+            vel_norm = self.agents[i].state[6:9] / 15.0 # Normalized by max expected speed
+            
+            # Total Obs Dim: 25 (rays) + 4 (goal) + 3 (vel) = 32
+            obs = np.concatenate([ranges_norm, [dist_norm, sin_theta, cos_theta, sin_phi], vel_norm])
             obs_all.append(obs)
             
         return np.array(obs_all, dtype=np.float32)
@@ -258,41 +283,48 @@ class QuadcopterEnv:
             
         return min_dist
 
-    def step(self, actions: List[int]) -> Tuple[np.ndarray, np.ndarray, bool, bool, Dict[str, Any]]:
-        """Executes one environment step."""
+    def step(self, actions: np.ndarray) -> Tuple[np.ndarray, np.ndarray, bool, bool, Dict[str, Any]]:
+        """
+        Executes one environment step.
+        actions: (num_agents, 4) in range [-1, 1]
+        """
         self.step_count += 1
         
         # Update dynamic obstacles
         for obs in self.obstacles:
             if np.any(obs['vel'] != 0):
-                # Oscillate around origin
-                obs['pos'] = obs['origin'] + obs['vel'] * np.sin(self.step_count * 0.05)
+                # Oscillate with unique frequency and phase
+                phase = obs.get('phase', 0.0)
+                freq = obs.get('freq', 0.05)
+                obs['pos'] = obs['origin'] + obs['vel'] * np.sin(self.step_count * freq + phase)
         
-        # Action mapping (Increased speeds for real-life feel)
-        action_map = {
-            0: [10.0, 0.0, 0.0, 0.0], # Forward (Extreme)
-            1: [5.0, 0.0, 0.0, 90.0],  # Forward + Yaw Right
-            2: [5.0, 0.0, 0.0, -90.0], # Forward + Yaw Left
-            3: [5.0, 0.0, 5.0, 0.0],   # Forward + Up
-            4: [5.0, 0.0, -5.0, 0.0],  # Forward + Down
-            5: [0.0, 0.0, 0.0, 0.0]    # Hover
-        }
+        # Action scaling (Continuous)
+        # vx: [0, 5], vy: [-2, 2], vz: [-2, 2], yaw_rate: [-90, 90]
+        v_max = 5.0
+        v_side_max = 2.0
+        v_z_max = 2.0
+        yaw_rate_max = 90.0
         
         # Apply actions
         for i in range(self.num_agents):
-            cmd = np.array(action_map[actions[i]], dtype=np.float32)
+            action = actions[i]
+            vx_cmd = (action[0] + 1.0) / 2.0 * v_max # [0, 5]
+            vy_cmd = action[1] * v_side_max
+            vz_cmd = action[2] * v_z_max
+            yaw_rate_cmd = action[3] * yaw_rate_max
+            
             # Transform vx, vy to world frame based on yaw
             yaw = self.agents[i].state[5]
-            vx_world = cmd[0] * np.cos(yaw) - cmd[1] * np.sin(yaw)
-            vy_world = cmd[0] * np.sin(yaw) + cmd[1] * np.cos(yaw)
-            world_cmd = np.array([vx_world, vy_world, cmd[2], cmd[3]])
+            vx_world = vx_cmd * np.cos(yaw) - vy_cmd * np.sin(yaw)
+            vy_world = vx_cmd * np.sin(yaw) + vy_cmd * np.cos(yaw)
+            world_cmd = np.array([vx_world, vy_world, vz_cmd, yaw_rate_cmd])
             
-            # Track dynamics for Jerk calculation
-            old_vel = self.agents[i].state[3:6].copy()
+            # Academic Metrics
+            # Jerk: Rate of change of acceleration (Indices 6:9 are velocity)
+            old_vel = self.agents[i].state[6:9].copy()
             self.agents[i].step(world_cmd)
-            new_vel = self.agents[i].state[3:6]
+            new_vel = self.agents[i].state[6:9]
             
-            # Jerk calculation: da/dt
             accel = (new_vel - old_vel) / self.dt
             jerk = np.linalg.norm(accel - self.prev_accel[i]) / self.dt
             self.total_jerk[i] += jerk
@@ -314,28 +346,32 @@ class QuadcopterEnv:
             dist_to_goal = np.linalg.norm(pos - goal)
             d_min = self._get_min_distance(i)
             
-            # Rewards (Thesis Proposed)
+            # Rewards (Thesis Proposed - Revised to prevent reward hacking)
+            weights = self.reward_config['weights']
+            
             # 1. Transfer Reward: Positive if moving closer, negative if moving away
-            r_transfer = 1.0 * (self.prev_dist_to_goal[i] - dist_to_goal)
+            r_transfer = weights.get('transfer', 2.0) * (self.prev_dist_to_goal[i] - dist_to_goal)
             self.prev_dist_to_goal[i] = dist_to_goal
             
             # 2. Collision Penalty: Exponential penalty based on distance to nearest obstacle
-            r_collision = -100.0 * np.exp(-2.0 * max(d_min, 0.0))
+            r_collision = -weights.get('collision', 100.0) * np.exp(-2.0 * max(d_min, 0.0))
             
-            # 3. Free Space Reward: Encourages exploration of safe areas
-            r_free_space = 0.5 if d_min > 2.0 else 0.0
+            # 3. Smoothness Penalty: Penalize high jerk
+            r_smooth = -weights.get('smoothness', 0.01) * jerk
             
             # 4. Step Penalty: Constant penalty to prevent unproductive movements
-            r_step = -0.05 # Increased slightly to encourage efficiency
+            r_step = -weights.get('step_penalty', 0.1)
             
-            rewards[i] = r_transfer + r_collision + r_free_space + r_step
+            rewards[i] = r_transfer + r_collision + r_smooth + r_step
             
             if dist_to_goal < self.goal_dist:
                 success_count += 1
+                rewards[i] += self.reward_config.get('goal_bonus', 100.0)
                 
             if d_min < self.collision_dist:
                 terminated = True
                 info['collision'] = True
+                rewards[i] += self.reward_config.get('collision_penalty', -50.0)
             
             # Update safety frontier
             self.safety_frontier[i] = min(self.safety_frontier[i], d_min)

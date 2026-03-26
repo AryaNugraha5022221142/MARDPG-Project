@@ -7,17 +7,16 @@ from typing import Tuple
 class ActorLSTM(nn.Module):
     """
     LSTM-based Actor network shared across all agents.
+    Outputs continuous actions in [-1, 1].
     """
-    def __init__(self, input_dim: int = 28, hidden_dim: int = 128, num_layers: int = 1, output_dim: int = 6, dropout: float = 0.2):
+    def __init__(self, input_dim: int = 32, hidden_dim: int = 128, num_layers: int = 1, output_dim: int = 4, dropout: float = 0.1):
         super(ActorLSTM, self).__init__()
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
         
         self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True)
         self.fc1 = nn.Linear(hidden_dim, 256)
-        self.dropout1 = nn.Dropout(dropout)
         self.fc2 = nn.Linear(256, 128)
-        self.dropout2 = nn.Dropout(dropout)
         self.fc3 = nn.Linear(128, output_dim)
 
     def init_hidden(self, batch_size: int = 1, device: str = 'cpu') -> Tuple[torch.Tensor, torch.Tensor]:
@@ -40,20 +39,62 @@ class ActorLSTM(nn.Module):
             
         out, hidden = self.lstm(x, hidden)
         
-        if is_single_step:
-            out = out.squeeze(1) # (batch, hidden_dim)
-        else:
-            # For sequence training, we might want all outputs or just the last
-            # Assuming we process the whole sequence and return all outputs
-            pass
-            
+        # Process all time steps for sequence training
         x = F.relu(self.fc1(out))
-        x = self.dropout1(x)
         x = F.relu(self.fc2(x))
-        x = self.dropout2(x)
-        logits = self.fc3(x)
+        actions = torch.tanh(self.fc3(x))
         
-        return logits, hidden
+        if is_single_step:
+            actions = actions.squeeze(1)
+            
+        return actions, hidden
+
+class CriticLSTM(nn.Module):
+    """
+    Centralized LSTM-based Critic network.
+    """
+    def __init__(self, obs_dim: int = 32, action_dim: int = 4, num_agents: int = 3, hidden_dim: int = 128, num_layers: int = 1):
+        super(CriticLSTM, self).__init__()
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
+        
+        # Centralized input: all observations + all actions
+        input_dim = (obs_dim * num_agents) + (action_dim * num_agents)
+        
+        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True)
+        self.fc1 = nn.Linear(hidden_dim, 256)
+        self.fc2 = nn.Linear(256, 128)
+        self.fc3 = nn.Linear(128, 1)
+
+    def init_hidden(self, batch_size: int = 1, device: str = 'cpu') -> Tuple[torch.Tensor, torch.Tensor]:
+        h0 = torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(device)
+        c0 = torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(device)
+        return (h0, c0)
+
+    def forward(self, obs: torch.Tensor, actions: torch.Tensor, hidden: Tuple[torch.Tensor, torch.Tensor] = None) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        """
+        obs: (batch_size, seq_len, num_agents, obs_dim)
+        actions: (batch_size, seq_len, num_agents, action_dim)
+        """
+        batch_size = obs.size(0)
+        seq_len = obs.size(1)
+        
+        # Flatten num_agents and dims
+        obs_flat = obs.view(batch_size, seq_len, -1)
+        actions_flat = actions.view(batch_size, seq_len, -1)
+        
+        x = torch.cat([obs_flat, actions_flat], dim=2)
+        
+        if hidden is None:
+            hidden = self.init_hidden(batch_size, x.device)
+            
+        out, hidden = self.lstm(x, hidden)
+        
+        x = F.relu(self.fc1(out))
+        x = F.relu(self.fc2(x))
+        q_values = self.fc3(x)
+        
+        return q_values, hidden
 
 class Actor(nn.Module):
     """
