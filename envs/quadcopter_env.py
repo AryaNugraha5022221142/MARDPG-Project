@@ -47,7 +47,7 @@ class QuadcopterEnv:
         
         self.obstacles = []
         self.step_count = 0
-        self.max_steps = 1000 # Increased for larger arena
+        self.max_steps = config.get('max_steps', 2000)
         self.prev_dist_to_goal = np.zeros(self.num_agents, dtype=np.float32)
         
         # Reward weights from config
@@ -187,14 +187,20 @@ class QuadcopterEnv:
                     for obs in self.obstacles:
                         if obs['type'] == 'sphere':
                             obs_pos, obs_r = obs['pos'], obs['radius']
-                            oc = obs_pos - pos
-                            t = np.dot(oc, dir_vec)
-                            if t > 0:
-                                proj = pos + t * dir_vec
-                                dist_to_ray = np.linalg.norm(obs_pos - proj)
-                                if dist_to_ray < obs_r:
-                                    d = t - np.sqrt(obs_r**2 - dist_to_ray**2)
-                                    if d > 0 and d < min_dist: min_dist = d
+                            oc = pos - obs_pos
+                            a = np.dot(dir_vec, dir_vec)          # =1 for unit dir
+                            b = 2.0 * np.dot(oc, dir_vec)
+                            c = np.dot(oc, oc) - obs_r ** 2
+                            discriminant = b * b - 4 * a * c
+                            if discriminant >= 0:
+                                sqrt_disc = np.sqrt(discriminant)
+                                t1 = (-b - sqrt_disc) / (2 * a)
+                                t2 = (-b + sqrt_disc) / (2 * a)
+                                # Use the nearest positive intersection
+                                for t_hit in (t1, t2):
+                                    if t_hit > 1e-4 and t_hit < min_dist:
+                                        min_dist = t_hit
+                                        break
                         else: # Box
                             # Ray-AABB intersection
                             b_min = obs['pos'] - obs['size']/2
@@ -247,12 +253,13 @@ class QuadcopterEnv:
             
             phi_goal = np.arctan2(rel_pos[2], np.sqrt(rel_pos[0]**2 + rel_pos[1]**2))
             sin_phi = np.sin(phi_goal)
+            cos_phi = np.cos(phi_goal)
             
             # 3. Velocity Info (Crucial for momentum awareness)
             vel_norm = self.agents[i].state[6:9] / 15.0 # Normalized by max expected speed
             
-            # Total Obs Dim: 25 (rays) + 4 (goal) + 3 (vel) = 32
-            obs = np.concatenate([ranges_norm, [dist_norm, sin_theta, cos_theta, sin_phi], vel_norm])
+            # Total Obs Dim: 25 (rays) + 5 (goal) + 3 (vel) = 33
+            obs = np.concatenate([ranges_norm, [dist_norm, sin_theta, cos_theta, sin_phi, cos_phi], vel_norm])
             obs_all.append(obs)
             
         return np.array(obs_all, dtype=np.float32)
@@ -299,16 +306,18 @@ class QuadcopterEnv:
                 obs['pos'] = obs['origin'] + obs['vel'] * np.sin(self.step_count * freq + phase)
         
         # Action scaling (Continuous)
-        # vx: [0, 5], vy: [-2, 2], vz: [-2, 2], yaw_rate: [-90, 90]
+        # vx: [-5, 5], vy: [-2, 2], vz: [-2, 2], yaw_rate: [-90, 90]
         v_max = 5.0
         v_side_max = 2.0
         v_z_max = 2.0
         yaw_rate_max = 90.0
         
+        jerk_arr = np.zeros(self.num_agents, dtype=np.float32)
+        
         # Apply actions
         for i in range(self.num_agents):
             action = actions[i]
-            vx_cmd = (action[0] + 1.0) / 2.0 * v_max # [0, 5]
+            vx_cmd = action[0] * v_max
             vy_cmd = action[1] * v_side_max
             vz_cmd = action[2] * v_z_max
             yaw_rate_cmd = action[3] * yaw_rate_max
@@ -326,9 +335,10 @@ class QuadcopterEnv:
             new_vel = self.agents[i].state[6:9]
             
             accel = (new_vel - old_vel) / self.dt
-            jerk = np.linalg.norm(accel - self.prev_accel[i]) / self.dt
-            self.total_jerk[i] += jerk
+            jerk_val = np.linalg.norm(accel - self.prev_accel[i]) / self.dt
+            self.total_jerk[i] += jerk_val
             self.prev_accel[i] = accel.copy()
+            jerk_arr[i] = jerk_val
             
         obs = self._get_observations()
         rewards = np.zeros(self.num_agents, dtype=np.float32)
@@ -353,11 +363,16 @@ class QuadcopterEnv:
             r_transfer = weights.get('transfer', 2.0) * (self.prev_dist_to_goal[i] - dist_to_goal)
             self.prev_dist_to_goal[i] = dist_to_goal
             
-            # 2. Collision Penalty: Exponential penalty based on distance to nearest obstacle
-            r_collision = -weights.get('collision', 100.0) * np.exp(-2.0 * max(d_min, 0.0))
+            # 2. Collision Penalty: Zone-based penalty
+            SAFETY_MARGIN = 2.0
+            if d_min < SAFETY_MARGIN:
+                proximity_factor = 1.0 - (d_min / SAFETY_MARGIN)
+                r_collision = -weights.get('collision', 10.0) * proximity_factor
+            else:
+                r_collision = 0.0
             
             # 3. Smoothness Penalty: Penalize high jerk
-            r_smooth = -weights.get('smoothness', 0.01) * jerk
+            r_smooth = -weights.get('smoothness', 0.01) * jerk_arr[i]
             
             # 4. Step Penalty: Constant penalty to prevent unproductive movements
             r_step = -weights.get('step_penalty', 0.1)

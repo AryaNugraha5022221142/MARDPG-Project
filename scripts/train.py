@@ -45,7 +45,7 @@ def main():
     # Agent
     if args.agent == 'mardpg':
         agent = MARDPG(
-            obs_dim=32, 
+            obs_dim=33, 
             action_dim=4, 
             num_agents=config['training']['num_agents'], 
             config=config, 
@@ -54,7 +54,7 @@ def main():
     else:
         # Assuming MADDPG is also updated or we just use MARDPG
         agent = MARDPG(
-            obs_dim=32, 
+            obs_dim=33, 
             action_dim=4, 
             num_agents=config['training']['num_agents'], 
             config=config, 

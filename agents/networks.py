@@ -9,7 +9,7 @@ class ActorLSTM(nn.Module):
     LSTM-based Actor network shared across all agents.
     Outputs continuous actions in [-1, 1].
     """
-    def __init__(self, input_dim: int = 32, hidden_dim: int = 128, num_layers: int = 1, output_dim: int = 4, dropout: float = 0.1):
+    def __init__(self, input_dim: int = 33, hidden_dim: int = 128, num_layers: int = 1, output_dim: int = 4, dropout: float = 0.1):
         super(ActorLSTM, self).__init__()
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
@@ -53,7 +53,7 @@ class CriticLSTM(nn.Module):
     """
     Centralized LSTM-based Critic network.
     """
-    def __init__(self, obs_dim: int = 32, action_dim: int = 4, num_agents: int = 3, hidden_dim: int = 128, num_layers: int = 1):
+    def __init__(self, obs_dim: int = 33, action_dim: int = 4, num_agents: int = 3, hidden_dim: int = 128, num_layers: int = 1):
         super(CriticLSTM, self).__init__()
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers

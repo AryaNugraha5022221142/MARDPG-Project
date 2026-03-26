@@ -33,7 +33,7 @@ def main():
     )
     
     agent = MARDPG(
-        obs_dim=32, 
+        obs_dim=33, 
         action_dim=4, 
         num_agents=config['training']['num_agents'], 
         config=config, 
