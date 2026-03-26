@@ -5,9 +5,10 @@ class QuadcopterDynamics:
     """
     First-order velocity tracking dynamics for a quadcopter.
     """
-    def __init__(self, dt: float = 0.01, tau: float = 0.1):
+    def __init__(self, dt: float = 0.01, tau: float = 0.1, noise_std: float = 0.0):
         self.dt = dt
         self.tau = tau
+        self.noise_std = noise_std
         
         # State: [x, y, z, phi, theta, psi, vx, vy, vz, omega_x, omega_y, omega_z]
         self.state = np.zeros(12, dtype=np.float32)
@@ -24,6 +25,10 @@ class QuadcopterDynamics:
         velocity_cmd: [vx_cmd, vy_cmd, vz_cmd, yaw_rate_cmd (deg/s)]
         """
         v_cmd = velocity_cmd[0:3]
+        # Add disturbance noise if configured
+        if self.noise_std > 0:
+            v_cmd = v_cmd + np.random.normal(0, self.noise_std, size=3)
+            
         yaw_rate_cmd_rad = np.deg2rad(velocity_cmd[3])
         
         # Current velocities
