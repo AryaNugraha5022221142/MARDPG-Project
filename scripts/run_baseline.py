@@ -55,10 +55,11 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
         # Velocity consistency for this episode
         ep_velocities = []
         
-        # APF Hyperparameters
-        k_att = 1.0
-        k_rep = 50.0
-        d_min = 5.0
+        # APF Hyperparameters (Tuned for Thesis Baseline)
+        k_att = 2.5    # Increased attraction
+        k_rep = 40.0   # Adjusted repulsion
+        k_damp = 0.5   # Added damping to handle inertia
+        d_min = 3.0    # Reduced threshold for dense environments
         
         while not done:
             start_time = time.time()
@@ -67,7 +68,10 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
             actions = []
             current_vels = []
             for i in range(num_agents):
-                agent_pos = env.agents[i].state[:3]
+                agent_state = env.agents[i].state
+                agent_pos = agent_state[:3]
+                agent_vel = agent_state[7:10] # World velocity
+                
                 ep_trajectories[i].append(agent_pos.copy())
                 goal_pos = env.goals[i]
                 
@@ -75,7 +79,7 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
                 f_att = (goal_pos - agent_pos)
                 dist_to_goal = np.linalg.norm(f_att)
                 if dist_to_goal > 0.1:
-                    f_att = f_att / dist_to_goal * k_att
+                    f_att = (f_att / dist_to_goal) * k_att
                 
                 # 2. Repulsive force
                 f_rep = np.zeros(3)
@@ -89,21 +93,24 @@ def run_apf_baseline(scenario='city', num_agents=3, num_episodes=10, render=True
                     
                     if dist < d_min:
                         rep_mag = k_rep * (1.0/dist - 1.0/d_min) / (dist**2)
-                        f_rep += (dist_vec / np.linalg.norm(dist_vec)) * rep_mag
+                        f_rep += (dist_vec / (np.linalg.norm(dist_vec) + 1e-6)) * rep_mag
                 
-                f_total = f_att + f_rep
+                # 3. Damping force (to handle inertia)
+                f_damp = -k_damp * agent_vel
+                
+                f_total = f_att + f_rep + f_damp
                 current_vels.append(f_total / (np.linalg.norm(f_total) + 1e-6))
                 
-                # Map force to discrete actions
-                if f_total[2] > 0.5: actions.append(3) # Up
-                elif f_total[2] < -0.5: actions.append(4) # Down
+                # Map force to discrete actions (Refined thresholds)
+                if f_total[2] > 0.3: actions.append(3) # Up
+                elif f_total[2] < -0.3: actions.append(4) # Down
                 else:
                     target_yaw = np.arctan2(f_total[1], f_total[0])
                     current_yaw = env.agents[i].state[5]
                     yaw_diff = (target_yaw - current_yaw + np.pi) % (2 * np.pi) - np.pi
                     
-                    if yaw_diff > 0.3: actions.append(1) # Right
-                    elif yaw_diff < -0.3: actions.append(2) # Left
+                    if yaw_diff > 0.2: actions.append(1) # Right
+                    elif yaw_diff < -0.2: actions.append(2) # Left
                     else: actions.append(0) # Forward
             
             # Calculate Velocity Consistency (Cosine Similarity between agents)
