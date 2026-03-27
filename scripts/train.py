@@ -8,6 +8,7 @@ import torch
 import matplotlib.pyplot as plt
 from collections import deque
 import pandas as pd
+import json
 
 # Add the project root to the Python path so it can find 'envs' and 'agents'
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -19,16 +20,21 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='config/config.yaml', help='Path to config file')
     parser.add_argument('--run-name', type=str, default='mardpg_run', help='Name of the run')
-    parser.add_argument('--agent', type=str, default='mardpg', choices=['mardpg', 'maddpg'], help='Agent type to train')
+    parser.add_argument('--agent', type=str, default='mardpg', choices=['mardpg', 'maddpg', 'iddpg'], help='Agent type to train')
     parser.add_argument('--scenario', type=str, default=None, help='Scenario name (e.g., urban_canyon, search_and_rescue)')
+    parser.add_argument('--num-episodes', type=int, default=None, help='Number of episodes to train')
+    parser.add_argument('--seed', type=int, default=None, help='Random seed')
+    parser.add_argument('--output-json', type=str, default=None, help='Path to save final metrics as JSON')
     parser.add_argument('--render', action='store_true', help='Enable 3D visualization during training')
+    parser.add_argument('--sensor-noise', type=float, default=0.02, help='Sensor noise standard deviation')
+    parser.add_argument('--reward-type', type=str, default='linear', choices=['linear', 'exponential'], help='Reward function type')
     args = parser.parse_args()
 
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
 
     # Set seeds
-    seed = config['training'].get('seed', 42)
+    seed = args.seed if args.seed is not None else config['training'].get('seed', 42)
     np.random.seed(seed)
     torch.manual_seed(seed)
 
@@ -37,21 +43,31 @@ def main():
     print(f"Using device: {device}")
 
     # Environment
+    env_config = config['environment'].copy()
+    if args.scenario:
+        from envs.scenarios import get_scenario_config
+        scenario_config = get_scenario_config(args.scenario)
+        env_config.update(scenario_config)
+    
+    env_config['sensor_noise_std'] = args.sensor_noise
+    env_config['reward_type'] = args.reward_type
+
     env = QuadcopterEnv(
         num_agents=config['training']['num_agents'], 
-        config=config['environment'],
+        config=env_config,
         render_mode='human' if args.render else None,
         scenario=args.scenario
     )
 
     # Agent
-    if args.agent == 'mardpg':
+    if args.agent in ['mardpg', 'iddpg']:
         agent = MARDPG(
             obs_dim=33, 
             action_dim=4, 
             num_agents=config['training']['num_agents'], 
             config=config, 
-            device=device
+            device=device,
+            independent_critics=(args.agent == 'iddpg')
         )
     else:
         agent = MADDPG(
@@ -79,7 +95,7 @@ def main():
     os.makedirs(config['logging']['log_dir'], exist_ok=True)
 
     # Training Loop
-    num_episodes = config['training']['num_episodes']
+    num_episodes = args.num_episodes if args.num_episodes is not None else config['training']['num_episodes']
     epsilon = config['learning']['epsilon_start']
     epsilon_end = config['learning']['epsilon_end']
     epsilon_decay = config['learning']['epsilon_decay']
@@ -120,7 +136,14 @@ def main():
             done = terminated or truncated
             dones = np.array([done] * env.num_agents, dtype=np.float32)
             
-            agent.memory.push(obs, np.array(actions), rewards, next_obs, dones)
+            if args.agent == 'mardpg':
+                # Convert hidden states to numpy for storage
+                hidden_np = []
+                for h, c in hidden:
+                    hidden_np.append((h.cpu().numpy(), c.cpu().numpy()))
+                agent.memory.push(obs, np.array(actions), rewards, next_obs, dones, hidden_np)
+            else:
+                agent.memory.push(obs, np.array(actions), rewards, next_obs, dones)
             
             # Only update if we have enough episodes in the buffer
             if len(agent.memory) >= config['memory'].get('batch_size', 32):
@@ -172,6 +195,20 @@ def main():
     # Final save
     final_path = os.path.join(config['logging']['checkpoint_dir'], f"{args.agent}_final.pt")
     agent.save(final_path, epsilon, num_episodes)
+    
+    # Save metrics to JSON if requested
+    if args.output_json:
+        final_metrics = {
+            'agent': args.agent,
+            'scenario': args.scenario,
+            'episodes': num_episodes,
+            'avg_reward': np.mean(reward_history[-100:]),
+            'success_rate': np.mean(success_history[-100:]),
+            'total_successes': int(np.sum(success_history))
+        }
+        with open(args.output_json, 'w') as f:
+            json.dump(final_metrics, f, indent=4)
+        print(f"Final metrics saved to {args.output_json}")
     
     # --- ACADEMIC PLOTTING (Fig 8 Style) ---
     print("Generating Academic Learning Curves...")

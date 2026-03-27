@@ -53,13 +53,18 @@ class CriticLSTM(nn.Module):
     """
     Centralized LSTM-based Critic network.
     """
-    def __init__(self, obs_dim: int = 33, action_dim: int = 4, num_agents: int = 3, hidden_dim: int = 128, num_layers: int = 1):
+    def __init__(self, obs_dim: int = 33, action_dim: int = 4, num_agents: int = 3, hidden_dim: int = 128, num_layers: int = 1, independent: bool = False):
         super(CriticLSTM, self).__init__()
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
+        self.independent = independent
         
         # Centralized input: all observations + all actions
-        input_dim = (obs_dim * num_agents) + (action_dim * num_agents)
+        # Independent input: only one agent's observation + action
+        if independent:
+            input_dim = obs_dim + action_dim
+        else:
+            input_dim = (obs_dim * num_agents) + (action_dim * num_agents)
         
         self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True)
         self.fc1 = nn.Linear(hidden_dim, 256)
@@ -71,19 +76,25 @@ class CriticLSTM(nn.Module):
         c0 = torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(device)
         return (h0, c0)
 
-    def forward(self, obs: torch.Tensor, actions: torch.Tensor, hidden: Tuple[torch.Tensor, torch.Tensor] = None) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+    def forward(self, obs: torch.Tensor, actions: torch.Tensor, hidden: Tuple[torch.Tensor, torch.Tensor] = None, agent_idx: int = None) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
-        obs: (batch_size, seq_len, num_agents, obs_dim)
-        actions: (batch_size, seq_len, num_agents, action_dim)
+        obs: (batch_size, seq_len, num_agents, obs_dim) or (batch_size, seq_len, obs_dim)
+        actions: (batch_size, seq_len, num_agents, action_dim) or (batch_size, seq_len, action_dim)
         """
         batch_size = obs.size(0)
         seq_len = obs.size(1)
         
-        # Flatten num_agents and dims
-        obs_flat = obs.view(batch_size, seq_len, -1)
-        actions_flat = actions.view(batch_size, seq_len, -1)
-        
-        x = torch.cat([obs_flat, actions_flat], dim=2)
+        if self.independent:
+            # If independent, we expect obs and actions to be already sliced or we slice them here
+            if obs.dim() == 4:
+                obs = obs[:, :, agent_idx, :]
+                actions = actions[:, :, agent_idx, :]
+            x = torch.cat([obs, actions], dim=2)
+        else:
+            # Flatten num_agents and dims
+            obs_flat = obs.view(batch_size, seq_len, -1)
+            actions_flat = actions.view(batch_size, seq_len, -1)
+            x = torch.cat([obs_flat, actions_flat], dim=2)
         
         if hidden is None:
             hidden = self.init_hidden(batch_size, x.device)

@@ -72,12 +72,38 @@ def run_ablation_2():
     return statistical_comparison(ctde_results, iddpg_results, 'MARDPG (CTDE)', 'IDDPG')
 
 
+def run_ablation_3():
+    """With vs without sensor noise — tests sim-to-real robustness."""
+    print("\n=== Ablation 3: Sensor Noise Robustness ===")
+    noise_results, clean_results = [], []
+    for seed in SEEDS:
+        # Default is 0.02 (2%)
+        noise_results.append(run_experiment('mardpg', seed, ['--sensor-noise', '0.02'])['success_rate'])
+        clean_results.append(run_experiment('mardpg', seed, ['--sensor-noise', '0.0'])['success_rate'])
+    return statistical_comparison(noise_results, clean_results, 'With Noise (2%)', 'Clean Sensors')
+
+
+def run_ablation_4():
+    """Linear vs Exponential collision penalty — tests reward shaping hypothesis."""
+    print("\n=== Ablation 4: Reward Function Shaping ===")
+    linear_results, expo_results = [], []
+    for seed in SEEDS:
+        linear_results.append(run_experiment('mardpg', seed, ['--reward-type', 'linear'])['success_rate'])
+        expo_results.append(run_experiment('mardpg', seed, ['--reward-type', 'exponential'])['success_rate'])
+    return statistical_comparison(linear_results, expo_results, 'Linear Penalty', 'Exponential Penalty')
+
+
 if __name__ == '__main__':
     abl1 = run_ablation_1()
     abl2 = run_ablation_2()
+    abl3 = run_ablation_3()
+    abl4 = run_ablation_4()
+    
     summary = pd.DataFrame([
         {'ablation': 'LSTM vs MLP', **abl1},
-        {'ablation': 'CTDE vs IDDPG', **abl2}
+        {'ablation': 'CTDE vs IDDPG', **abl2},
+        {'ablation': 'Sensor Noise', **abl3},
+        {'ablation': 'Reward Function', **abl4}
     ])
     summary.to_csv(f'{RESULTS_DIR}/ablation_summary.csv', index=False)
     print("\n=== Summary saved ===")

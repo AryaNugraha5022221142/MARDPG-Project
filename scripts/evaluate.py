@@ -17,7 +17,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='config/config.yaml')
     parser.add_argument('--checkpoint', type=str, required=True)
-    parser.add_argument('--agent', type=str, default='mardpg', choices=['mardpg', 'maddpg'], help='Agent type to evaluate')
+    parser.add_argument('--agent', type=str, default='mardpg', choices=['mardpg', 'maddpg', 'iddpg'], help='Agent type to evaluate')
     parser.add_argument('--scenario', type=str, default=None, help='Scenario name')
     parser.add_argument('--episodes', type=int, default=100)
     parser.add_argument('--render', action='store_true', help='Enable 3D visualization')
@@ -35,13 +35,14 @@ def main():
         scenario=args.scenario
     )
     
-    if args.agent == 'mardpg':
+    if args.agent in ['mardpg', 'iddpg']:
         agent = MARDPG(
             obs_dim=33, 
             action_dim=4, 
             num_agents=config['training']['num_agents'], 
             config=config, 
-            device=device
+            device=device,
+            independent_critics=(args.agent == 'iddpg')
         )
     else:
         agent = MADDPG(
@@ -84,7 +85,7 @@ def main():
             for i in range(env.num_agents):
                 ep_trajectories[i].append(env.agents[i].state[:3].copy())
                 
-            if args.agent == 'mardpg':
+            if args.agent in ['mardpg', 'iddpg']:
                 actions, hidden = agent.select_actions(obs, hidden, noise_scale=0.0) # Greedy
             else:
                 actions = agent.select_actions(obs, noise_scale=0.0)

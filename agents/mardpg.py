@@ -34,11 +34,12 @@ class MARDPG:
     Multi-Agent Recurrent Deterministic Policy Gradient (MARDPG)
     """
     def __init__(self, obs_dim: int = 33, action_dim: int = 4, num_agents: int = 3, 
-                 config: Dict[str, Any] = None, device: str = 'cpu'):
+                 config: Dict[str, Any] = None, device: str = 'cpu', independent_critics: bool = False):
         self.obs_dim = obs_dim
         self.action_dim = action_dim
         self.num_agents = num_agents
         self.device = device
+        self.independent_critics = independent_critics
         
         if config is None:
             config = {
@@ -63,7 +64,7 @@ class MARDPG:
         self.actor_target = copy.deepcopy(self.actor).to(self.device)
         
         # Centralized Critics (one per agent, but each sees all agents)
-        self.critics = [CriticLSTM(obs_dim, action_dim, num_agents, hidden_dim, lstm_layers).to(self.device) for _ in range(num_agents)]
+        self.critics = [CriticLSTM(obs_dim, action_dim, num_agents, hidden_dim, lstm_layers, independent=independent_critics).to(self.device) for _ in range(num_agents)]
         self.critics_target = [copy.deepcopy(c).to(self.device) for c in self.critics]
         
         # Noise (OU for continuous)
@@ -120,7 +121,8 @@ class MARDPG:
             return {}
             
         # Sample batch of sequences: (batch, seq_len, num_agents, dim)
-        obs_seq, act_seq, rew_seq, nobs_seq, done_seq = self.memory.sample(self.batch_size, self.seq_len)
+        # init_hidden: (h_init, c_init) where each is list of (num_layers, batch, hidden_dim)
+        obs_seq, act_seq, rew_seq, nobs_seq, done_seq, init_hidden = self.memory.sample(self.batch_size, self.seq_len)
         
         # Convert to tensors
         obs = torch.FloatTensor(obs_seq).to(self.device)
@@ -128,6 +130,10 @@ class MARDPG:
         rewards = torch.FloatTensor(rew_seq).to(self.device)
         next_obs = torch.FloatTensor(nobs_seq).to(self.device)
         dones = torch.FloatTensor(done_seq).to(self.device)
+        
+        h_init, c_init = init_hidden
+        h_init = [torch.FloatTensor(h).to(self.device) for h in h_init]
+        c_init = [torch.FloatTensor(c).to(self.device) for c in c_init]
         
         # 1. Update Critics
         critic_losses = []
@@ -138,19 +144,23 @@ class MARDPG:
             for i in range(self.num_agents):
                 # Actor target needs (batch, seq_len, obs_dim)
                 agent_next_obs = next_obs[:, :, i, :]
-                next_act, _ = self.actor_target(agent_next_obs, None)
+                # Use current hidden state for target actor? 
+                # Standard practice is to use zero-state or stored-state for target actor too
+                next_act, _ = self.actor_target(agent_next_obs, (h_init[i], c_init[i]))
                 next_actions_all.append(next_act)
             next_actions_all = torch.stack(next_actions_all, dim=2) # (batch, seq_len, num_agents, action_dim)
             
         for i in range(self.num_agents):
             # Target Q
             with torch.no_grad():
-                target_q_seq, _ = self.critics_target[i](next_obs, next_actions_all, None)
+                # For simplicity, we use zero-state for centralized critic target or stored-state?
+                # Let's use zero-state for critic as it's centralized and complex
+                target_q_seq, _ = self.critics_target[i](next_obs, next_actions_all, None, agent_idx=i)
                 target_q_seq = target_q_seq.squeeze(-1) # (batch, seq_len)
                 target_q = rewards[:, :, i] + self.gamma * target_q_seq * (1 - dones[:, :, i])
                 
             # Current Q
-            current_q_seq, _ = self.critics[i](obs, actions, None)
+            current_q_seq, _ = self.critics[i](obs, actions, None, agent_idx=i)
             current_q = current_q_seq.squeeze(-1) # (batch, seq_len)
             
             # Critic loss (MSE over sequence)
@@ -168,14 +178,14 @@ class MARDPG:
         actor_actions_all = []
         for i in range(self.num_agents):
             agent_obs = obs[:, :, i, :]
-            act, _ = self.actor(agent_obs, None)
+            act, _ = self.actor(agent_obs, (h_init[i], c_init[i]))
             actor_actions_all.append(act)
         actor_actions_all = torch.stack(actor_actions_all, dim=2) # (batch, seq_len, num_agents, action_dim)
         
         actor_loss = 0
         for i in range(self.num_agents):
             # Centralized critic evaluation
-            q_values, _ = self.critics[i](obs, actor_actions_all, None)
+            q_values, _ = self.critics[i](obs, actor_actions_all, None, agent_idx=i)
             actor_loss += -q_values.mean()
         actor_loss /= self.num_agents
             

@@ -50,6 +50,10 @@ class QuadcopterEnv:
         self.max_steps = config.get('max_steps', 2000)
         self.prev_dist_to_goal = np.zeros(self.num_agents, dtype=np.float32)
         
+        # Ablation options
+        self.sensor_noise_std = config.get('sensor_noise_std', 0.02) # 2% default
+        self.reward_type = config.get('reward_type', 'linear') # 'linear' or 'exponential'
+        
         # Reward weights from config
         self.reward_config = config.get('rewards', {
             'weights': {'transfer': 2.0, 'collision': 100.0, 'smoothness': 0.01, 'step_penalty': 0.1},
@@ -210,8 +214,8 @@ class QuadcopterEnv:
             v_angles = np.deg2rad(np.array([-30, -15, 0, 15, 30]))
             ranges = np.ones(25, dtype=np.float32) * self.max_range
             
-            # Add 2% Gaussian noise to sensors
-            sensor_noise = np.random.normal(0, 0.02 * self.max_range, 25)
+            # Add Gaussian noise to sensors
+            sensor_noise = np.random.normal(0, self.sensor_noise_std * self.max_range, 25)
             
             idx = 0
             for ha in h_angles:
@@ -423,7 +427,12 @@ class QuadcopterEnv:
             SAFETY_MARGIN = 2.0
             if d_min < SAFETY_MARGIN:
                 proximity_factor = 1.0 - (d_min / SAFETY_MARGIN)
-                r_collision = -weights.get('collision', 10.0) * proximity_factor
+                if self.reward_type == 'exponential':
+                    # Exponential penalty: e^(k * proximity) - 1
+                    r_collision = -weights.get('collision', 10.0) * (np.exp(3.0 * proximity_factor) - 1.0)
+                else:
+                    # Default linear penalty
+                    r_collision = -weights.get('collision', 10.0) * proximity_factor
             else:
                 r_collision = 0.0
             
