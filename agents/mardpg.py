@@ -177,6 +177,7 @@ class MARDPG:
             # Centralized critic evaluation
             q_values, _ = self.critics[i](obs, actor_actions_all, None)
             actor_loss += -q_values.mean()
+        actor_loss /= self.num_agents
             
         self.actor_optimizer.zero_grad()
         actor_loss.backward()

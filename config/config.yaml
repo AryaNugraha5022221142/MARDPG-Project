@@ -27,7 +27,7 @@ learning:
 memory:
   buffer_size: 1000
   batch_size: 32
-  seq_len: 16
+  seq_len: 64
 
 targets:
   update_rate: 0.01
