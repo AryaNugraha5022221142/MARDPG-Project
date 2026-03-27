@@ -86,6 +86,11 @@ def main():
     recent_rewards = deque(maxlen=100)
     recent_success = deque(maxlen=100)
     
+    # Curriculum Learning
+    curriculum_level = 0
+    success_threshold = 0.7  # 70% success to move to next level
+    env.set_curriculum_level(curriculum_level)
+    
     # Academic Data Tracking
     reward_history = []
     success_history = []
@@ -133,14 +138,24 @@ def main():
         
         epsilon = max(epsilon_end, epsilon * epsilon_decay)
         
+        # Update Curriculum
+        if episode % 100 == 0:
+            success_rate = np.mean(recent_success)
+            if len(recent_success) == 100 and success_rate >= success_threshold and curriculum_level < 4:
+                curriculum_level += 1
+                env.set_curriculum_level(curriculum_level)
+                # Reset success buffer to allow agent to adapt to new difficulty
+                recent_success.clear()
+        
         if episode % config['logging']['log_interval'] == 0:
             avg_reward = np.mean(recent_rewards)
             success_rate = np.mean(recent_success)
-            print(f"Episode {episode}/{num_episodes} | Avg Reward: {avg_reward:.2f} | Success Rate: {success_rate:.2f} | Epsilon: {epsilon:.3f}")
+            print(f"Episode {episode}/{num_episodes} | Level: {curriculum_level} | Avg Reward: {avg_reward:.2f} | Success Rate: {success_rate:.2f} | Epsilon: {epsilon:.3f}")
             
             if use_wandb:
                 wandb.log({
                     'episode': episode,
+                    'curriculum_level': curriculum_level,
                     'avg_reward': avg_reward,
                     'success_rate': success_rate,
                     'epsilon': epsilon
