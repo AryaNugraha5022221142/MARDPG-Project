@@ -99,8 +99,9 @@ class CriticLSTM(nn.Module):
 class Actor(nn.Module):
     """
     Standard MLP-based Actor network shared across all agents.
+    Outputs continuous actions in [-1, 1].
     """
-    def __init__(self, input_dim: int = 28, hidden_dim: int = 256, output_dim: int = 6, dropout: float = 0.2):
+    def __init__(self, input_dim: int = 33, hidden_dim: int = 256, output_dim: int = 4, dropout: float = 0.2):
         super(Actor, self).__init__()
         
         self.fc1 = nn.Linear(input_dim, hidden_dim)
@@ -118,15 +119,15 @@ class Actor(nn.Module):
         x = self.dropout1(x)
         x = F.relu(self.fc2(x))
         x = self.dropout2(x)
-        logits = self.fc3(x)
+        actions = torch.tanh(self.fc3(x))
         
-        return logits
+        return actions
 
 class Critic(nn.Module):
     """
     Centralized Critic network for a single agent.
     """
-    def __init__(self, obs_dim: int = 28, action_dim: int = 6, num_agents: int = 3, dropout: float = 0.2):
+    def __init__(self, obs_dim: int = 33, action_dim: int = 4, num_agents: int = 3, dropout: float = 0.2):
         super(Critic, self).__init__()
         
         input_dim = (obs_dim * num_agents) + (action_dim * num_agents)

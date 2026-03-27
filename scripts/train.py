@@ -52,8 +52,7 @@ def main():
             device=device
         )
     else:
-        # Assuming MADDPG is also updated or we just use MARDPG
-        agent = MARDPG(
+        agent = MADDPG(
             obs_dim=33, 
             action_dim=4, 
             num_agents=config['training']['num_agents'], 

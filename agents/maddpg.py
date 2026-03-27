@@ -22,7 +22,7 @@ class MADDPG:
     """
     Multi-Agent Deterministic Policy Gradient (MADDPG) - Non-Recurrent Baseline
     """
-    def __init__(self, obs_dim: int = 28, action_dim: int = 6, num_agents: int = 3, 
+    def __init__(self, obs_dim: int = 33, action_dim: int = 4, num_agents: int = 3, 
                  config: Dict[str, Any] = None, device: str = 'cpu'):
         self.obs_dim = obs_dim
         self.action_dim = action_dim
@@ -68,7 +68,7 @@ class MADDPG:
         buffer_size = config['memory'].get('buffer_size', 100000)
         self.memory = ReplayBuffer(buffer_size)
 
-    def select_actions(self, obs: np.ndarray, epsilon: float = 0.0) -> List[int]:
+    def select_actions(self, obs: np.ndarray, noise_scale: float = 0.0) -> np.ndarray:
         """
         Selects actions for all agents.
         obs: (num_agents, obs_dim)
@@ -79,17 +79,16 @@ class MADDPG:
         with torch.no_grad():
             for i in range(self.num_agents):
                 obs_tensor = torch.FloatTensor(obs[i]).unsqueeze(0).to(self.device) # (1, obs_dim)
-                logits = self.actor(obs_tensor)
+                action = self.actor(obs_tensor).cpu().numpy().squeeze(0)
                 
-                if epsilon > 0:
-                    noise = torch.FloatTensor(self.noise.sample()).to(self.device) * epsilon
-                    logits = logits + noise
+                if noise_scale > 0:
+                    noise = self.noise.sample() * noise_scale
+                    action = np.clip(action + noise, -1.0, 1.0)
                 
-                action = torch.argmax(logits, dim=1).item()
                 actions.append(action)
                 
         self.actor.train()
-        return actions
+        return np.array(actions)
 
     def update(self) -> Dict[str, float]:
         if len(self.memory) < self.batch_size:
@@ -97,33 +96,35 @@ class MADDPG:
             
         obs_batch, actions_batch, rewards_batch, next_obs_batch, dones_batch = self.memory.sample(self.batch_size)
         
-        obs = torch.FloatTensor(obs_batch).to(self.device)
-        actions = torch.LongTensor(actions_batch).to(self.device)
-        rewards = torch.FloatTensor(rewards_batch).to(self.device)
-        next_obs = torch.FloatTensor(next_obs_batch).to(self.device)
-        dones = torch.FloatTensor(dones_batch).to(self.device)
+        obs = torch.FloatTensor(obs_batch).to(self.device) # (batch, num_agents, obs_dim)
+        actions = torch.FloatTensor(actions_batch).to(self.device) # (batch, num_agents, action_dim)
+        rewards = torch.FloatTensor(rewards_batch).to(self.device) # (batch, num_agents)
+        next_obs = torch.FloatTensor(next_obs_batch).to(self.device) # (batch, num_agents, obs_dim)
+        dones = torch.FloatTensor(dones_batch).to(self.device) # (batch, num_agents)
         
-        actions_onehot = F.one_hot(actions, self.action_dim).float()
+        # Flatten obs and actions for centralized critic
+        obs_full = obs.view(self.batch_size, -1)
+        next_obs_full = next_obs.view(self.batch_size, -1)
         
         # 1. Update Critics
         critic_losses = []
         with torch.no_grad():
-            next_actions_logits = []
+            next_actions = []
             for i in range(self.num_agents):
                 agent_next_obs = next_obs[:, i, :]
-                logits = self.actor_target(agent_next_obs)
-                next_actions_logits.append(logits)
+                next_act = self.actor_target(agent_next_obs)
+                next_actions.append(next_act)
                 
-            next_actions_logits = torch.stack(next_actions_logits, dim=1)
-            next_actions = torch.argmax(next_actions_logits, dim=-1)
-            next_actions_onehot = F.one_hot(next_actions, self.action_dim).float()
+            next_actions = torch.stack(next_actions, dim=1) # (batch, num_agents, action_dim)
+            next_actions_full = next_actions.view(self.batch_size, -1)
             
         for i in range(self.num_agents):
             with torch.no_grad():
-                target_q = self.critics_target[i](next_obs, next_actions_onehot).squeeze(-1)
+                target_q = self.critics_target[i](next_obs_full, next_actions_full).squeeze(-1)
                 target_q = rewards[:, i] + self.gamma * target_q * (1 - dones[:, i])
                 
-            current_q = self.critics[i](obs, actions_onehot).squeeze(-1)
+            actions_full = actions.view(self.batch_size, -1)
+            current_q = self.critics[i](obs_full, actions_full).squeeze(-1)
             critic_loss = F.mse_loss(current_q, target_q)
             critic_losses.append(critic_loss.item())
             
@@ -133,19 +134,20 @@ class MADDPG:
             self.critic_optimizers[i].step()
             
         # 2. Update Actor
-        actor_logits = []
+        curr_actions = []
         for i in range(self.num_agents):
             agent_obs = obs[:, i, :]
-            logits = self.actor(agent_obs)
-            actor_logits.append(logits)
+            act = self.actor(agent_obs)
+            curr_actions.append(act)
             
-        actor_logits = torch.stack(actor_logits, dim=1)
-        actor_probs = F.softmax(actor_logits, dim=-1)
+        curr_actions = torch.stack(curr_actions, dim=1)
+        curr_actions_full = curr_actions.view(self.batch_size, -1)
         
         actor_loss = 0
         for i in range(self.num_agents):
-            q_values = self.critics[i](obs, actor_probs)
+            q_values = self.critics[i](obs_full, curr_actions_full)
             actor_loss += -q_values.mean()
+        actor_loss /= self.num_agents
             
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
