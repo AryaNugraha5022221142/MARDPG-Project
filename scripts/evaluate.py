@@ -11,12 +11,14 @@ import matplotlib.pyplot as plt
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from envs import QuadcopterEnv
-from agents import MARDPG
+from agents import MARDPG, MADDPG
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='config/config.yaml')
     parser.add_argument('--checkpoint', type=str, required=True)
+    parser.add_argument('--agent', type=str, default='mardpg', choices=['mardpg', 'maddpg'], help='Agent type to evaluate')
+    parser.add_argument('--scenario', type=str, default=None, help='Scenario name')
     parser.add_argument('--episodes', type=int, default=100)
     parser.add_argument('--render', action='store_true', help='Enable 3D visualization')
     args = parser.parse_args()
@@ -29,16 +31,26 @@ def main():
     env = QuadcopterEnv(
         num_agents=config['training']['num_agents'], 
         config=config['environment'],
-        render_mode='human' if args.render else None
+        render_mode='human' if args.render else None,
+        scenario=args.scenario
     )
     
-    agent = MARDPG(
-        obs_dim=33, 
-        action_dim=4, 
-        num_agents=config['training']['num_agents'], 
-        config=config, 
-        device=device
-    )
+    if args.agent == 'mardpg':
+        agent = MARDPG(
+            obs_dim=33, 
+            action_dim=4, 
+            num_agents=config['training']['num_agents'], 
+            config=config, 
+            device=device
+        )
+    else:
+        agent = MADDPG(
+            obs_dim=33, 
+            action_dim=4, 
+            num_agents=config['training']['num_agents'], 
+            config=config, 
+            device=device
+        )
     
     agent.load(args.checkpoint)
     print(f"Loaded checkpoint from {args.checkpoint}")
@@ -72,7 +84,11 @@ def main():
             for i in range(env.num_agents):
                 ep_trajectories[i].append(env.agents[i].state[:3].copy())
                 
-            actions, hidden = agent.select_actions(obs, hidden, noise_scale=0.0) # Greedy
+            if args.agent == 'mardpg':
+                actions, hidden = agent.select_actions(obs, hidden, noise_scale=0.0) # Greedy
+            else:
+                actions = agent.select_actions(obs, noise_scale=0.0)
+                
             obs, rewards, terminated, truncated, info = env.step(actions)
             done = terminated or truncated
             steps += 1

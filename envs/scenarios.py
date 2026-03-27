@@ -75,6 +75,42 @@ def get_scenario_config(scenario_name: str) -> Dict[str, Any]:
         config['arena_size'] = [40.0, 40.0, 20.0]
         return config
         
+    elif scenario_name == 'urban_canyon':
+        config = base_config.copy()
+        config['arena_size'] = [80.0, 80.0, 50.0]
+        config['num_obstacles'] = 0     # custom logic
+        config['dynamic_ratio'] = 0.0
+        config['dt'] = 0.01
+        config['max_steps'] = 2500
+        # Altitude corridor reward shaping (add to reward_config)
+        config['rewards'] = config.get('rewards', {}).copy()
+        config['rewards']['corridor_bonus'] = 0.5   # per step inside corridor
+        config['rewards']['corridor_low']  = [5.0, 15.0]
+        config['rewards']['corridor_high'] = [30.0, 45.0]
+        return config
+
+    elif scenario_name == 'search_and_rescue':
+        config = base_config.copy()
+        config['arena_size'] = [60.0, 60.0, 20.0]
+        config['num_obstacles'] = 30
+        config['dynamic_ratio'] = 0.0
+        config['max_steps'] = 2000
+        config['num_targets'] = 6         # shared targets
+        config['target_radius'] = 0.5
+        config['rewards'] = config.get('rewards', {}).copy()
+        config['rewards']['target_bonus'] = 50.0
+        config['rewards']['coverage_penalty'] = -5.0  # if agent revisits claimed target
+        return config
+
+    elif scenario_name == 'dynamic_intercept':
+        config = base_config.copy()
+        config['num_obstacles'] = 15
+        config['dynamic_ratio'] = 0.0     # interceptors handled separately
+        config['max_steps'] = 2000
+        config['rewards'] = config.get('rewards', {}).copy()
+        config['rewards']['interceptor_penalty_multiplier'] = 2.0
+        return config
+        
     return base_config
 
 def apply_scenario_custom_logic(env, scenario_name: str):
@@ -268,3 +304,79 @@ def apply_scenario_custom_logic(env, scenario_name: str):
             'origin': p_pos.copy(),
             'color': '#c0392b'
         })
+
+    elif scenario_name == 'urban_canyon':
+        building_footprints = [
+            (x, y)
+            for x in np.arange(12, 72, 16)
+            for y in np.arange(10, 74, 18)
+        ]
+        for (bx, by) in building_footprints:
+            w = np.random.uniform(6, 10)
+            d = np.random.uniform(6, 10)
+            h = np.random.uniform(20, 45)
+            pos = np.array([bx, by, h / 2])
+            env.obstacles.append({
+                'type': 'box', 'pos': pos,
+                'size': np.array([w, d, h]),
+                'vel': np.zeros(3), 'origin': pos.copy(),
+                'color': '#2c3e50', 'phase': 0, 'freq': 0,
+            })
+        # Two dynamic delivery drones as obstacles
+        for _ in range(2):
+            pos = np.array([
+                np.random.uniform(20, 60),
+                np.random.uniform(20, 60),
+                np.random.uniform(10, 40)
+            ])
+            vel = np.random.choice([-1, 1], size=3) * np.array([2.0, 2.0, 0.5])
+            env.obstacles.append({
+                'type': 'sphere', 'pos': pos, 'radius': 1.5,
+                'vel': vel, 'origin': pos.copy(),
+                'phase': np.random.uniform(0, 2 * np.pi),
+                'freq': 0.02, 'color': '#e74c3c',
+            })
+
+    elif scenario_name == 'search_and_rescue':
+        # Irregular debris boxes
+        for _ in range(env.num_obstacles):
+            pos = np.array([
+                np.random.uniform(5, env.arena_size[0] - 5),
+                np.random.uniform(5, env.arena_size[1] - 5),
+                np.random.uniform(0.5, 2.0)
+            ])
+            size = np.random.uniform(2.0, 6.0, size=3)
+            size[2] = np.random.uniform(0.5, 3.0) # Low debris
+            env.obstacles.append({
+                'type': 'box', 'pos': pos, 'size': size,
+                'vel': np.zeros(3), 'origin': pos.copy(),
+                'color': '#7f8c8d', 'phase': 0, 'freq': 0
+            })
+
+    elif scenario_name == 'dynamic_intercept':
+        # 15 pillars in the middle third
+        for _ in range(env.num_obstacles):
+            pos = np.array([
+                np.random.uniform(env.arena_size[0]/3, 2*env.arena_size[0]/3),
+                np.random.uniform(env.arena_size[1]/3, 2*env.arena_size[1]/3),
+                env.arena_size[2]/2
+            ])
+            env.obstacles.append({
+                'type': 'box', 'pos': pos,
+                'size': np.array([2.0, 2.0, env.arena_size[2]]),
+                'vel': np.zeros(3), 'origin': pos.copy(),
+                'color': '#34495e', 'phase': 0, 'freq': 0
+            })
+        # 3 interceptor spheres
+        for _ in range(3):
+            pos = np.array([
+                np.random.uniform(0, env.arena_size[0]),
+                np.random.uniform(0, env.arena_size[1]),
+                np.random.uniform(5, env.arena_size[2] - 5)
+            ])
+            env.obstacles.append({
+                'type': 'sphere', 'pos': pos, 'radius': 3.0,
+                'vel': np.zeros(3), 'origin': pos.copy(),
+                'is_interceptor': True, 'color': '#c0392b',
+                'phase': 0, 'freq': 0
+            })

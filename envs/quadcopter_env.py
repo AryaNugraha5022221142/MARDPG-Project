@@ -69,7 +69,7 @@ class QuadcopterEnv:
 
     def _generate_obstacles(self):
         """Generates random spherical and box obstacles, some dynamic."""
-        if self.scenario in ['narrow_passage', 'city', 'forest', 'warzone']:
+        if self.scenario in ['narrow_passage', 'city', 'forest', 'warzone', 'urban_canyon', 'search_and_rescue', 'dynamic_intercept']:
             from .scenarios import apply_scenario_custom_logic
             apply_scenario_custom_logic(self, self.scenario)
             return
@@ -143,7 +143,21 @@ class QuadcopterEnv:
             
         self.step_count = 0
         self._generate_obstacles()
-        self._update_goals() # Refresh goals for variety
+        
+        if self.scenario == 'search_and_rescue':
+            self.targets_claimed = set()
+            self.sar_targets = [
+                np.array([
+                    np.random.uniform(5, self.arena_size[0] - 5),
+                    np.random.uniform(5, self.arena_size[1] - 5),
+                    np.random.uniform(1, 5)   # low altitude — on the ground
+                ])
+                for _ in range(self.reward_config.get('num_targets', 6))
+            ]
+            # In SAR mode, goals are the nearest unclaimed target, dynamically updated
+            self._update_sar_goals()
+        else:
+            self._update_goals() # Refresh goals for variety
         
         # Reset metrics
         self.total_jerk = np.zeros(self.num_agents, dtype=np.float32)
@@ -164,6 +178,22 @@ class QuadcopterEnv:
             
         obs = self._get_observations()
         return obs, {}
+
+    def _update_sar_goals(self):
+        """Assign each agent to its nearest unclaimed target."""
+        for i in range(self.num_agents):
+            pos = self.agents[i].state[0:3]
+            unclaimed = [
+                (t, np.linalg.norm(pos - t))
+                for j, t in enumerate(self.sar_targets)
+                if j not in self.targets_claimed
+            ]
+            if unclaimed:
+                # Sort by distance and pick nearest
+                self.goals[i] = min(unclaimed, key=lambda x: x[1])[0]
+            else:
+                # All targets claimed, stay at current position or go to a default
+                self.goals[i] = pos.copy()
 
     def _get_observations(self) -> np.ndarray:
         """Computes observations for all agents."""
@@ -313,7 +343,19 @@ class QuadcopterEnv:
         
         # Update dynamic obstacles
         for obs in self.obstacles:
-            if np.any(obs['vel'] != 0):
+            if obs.get('is_interceptor', False):
+                # Find nearest agent
+                nearest_dist = float('inf')
+                nearest_pos = None
+                for agent in self.agents:
+                    d = np.linalg.norm(agent.state[0:3] - obs['pos'])
+                    if d < nearest_dist:
+                        nearest_dist = d
+                        nearest_pos = agent.state[0:3].copy()
+                if nearest_pos is not None and nearest_dist > 0.1:
+                    direction = (nearest_pos - obs['pos']) / nearest_dist
+                    obs['pos'] = obs['pos'] + direction * 1.5 * self.dt
+            elif np.any(obs['vel'] != 0):
                 # Oscillate with unique frequency and phase
                 phase = obs.get('phase', 0.0)
                 freq = obs.get('freq', 0.05)
@@ -393,19 +435,54 @@ class QuadcopterEnv:
             
             rewards[i] = r_transfer + r_collision + r_smooth + r_step
             
+            # Scenario-specific reward shaping
+            if self.scenario == 'urban_canyon':
+                altitude = pos[2]
+                low_band = self.reward_config.get('corridor_low', [5.0, 15.0])
+                high_band = self.reward_config.get('corridor_high', [30.0, 45.0])
+                if low_band[0] <= altitude <= low_band[1] or high_band[0] <= altitude <= high_band[1]:
+                    rewards[i] += self.reward_config.get('corridor_bonus', 0.5)
+
+            elif self.scenario == 'search_and_rescue':
+                # Check if agent reached any unclaimed target
+                target_radius = self.reward_config.get('target_radius', 0.5)
+                for j, t_pos in enumerate(self.sar_targets):
+                    if j not in self.targets_claimed:
+                        if np.linalg.norm(pos - t_pos) < target_radius:
+                            self.targets_claimed.add(j)
+                            rewards[i] += self.reward_config.get('target_bonus', 50.0)
+                            self._update_sar_goals()
+                            break
+                
             if dist_to_goal < self.goal_dist:
-                success_count += 1
-                rewards[i] += self.reward_config.get('goal_bonus', 100.0)
+                if self.scenario == 'search_and_rescue':
+                    # In SAR, goal is reached when all targets are claimed
+                    pass
+                else:
+                    success_count += 1
+                    rewards[i] += self.reward_config.get('goal_bonus', 100.0)
                 
             if d_min < self.collision_dist:
                 terminated = True
                 info['collision'] = True
-                rewards[i] += self.reward_config.get('collision_penalty', -50.0)
+                penalty = self.reward_config.get('collision_penalty', -50.0)
+                if self.scenario == 'dynamic_intercept':
+                    # Check if collision was with an interceptor
+                    for obs in self.obstacles:
+                        if obs.get('is_interceptor', False):
+                            if np.linalg.norm(pos - obs['pos']) < (obs['radius'] + 0.3):
+                                penalty *= self.reward_config.get('interceptor_penalty_multiplier', 2.0)
+                                break
+                rewards[i] += penalty
             
             # Update safety frontier
             self.safety_frontier[i] = min(self.safety_frontier[i], d_min)
                 
-        if success_count == self.num_agents:
+        if self.scenario == 'search_and_rescue':
+            if len(self.targets_claimed) == len(self.sar_targets):
+                terminated = True
+                info['success'] = True
+        elif success_count == self.num_agents:
             terminated = True
             info['success'] = True
             

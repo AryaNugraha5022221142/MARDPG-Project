@@ -20,6 +20,7 @@ def main():
     parser.add_argument('--config', type=str, default='config/config.yaml', help='Path to config file')
     parser.add_argument('--run-name', type=str, default='mardpg_run', help='Name of the run')
     parser.add_argument('--agent', type=str, default='mardpg', choices=['mardpg', 'maddpg'], help='Agent type to train')
+    parser.add_argument('--scenario', type=str, default=None, help='Scenario name (e.g., urban_canyon, search_and_rescue)')
     parser.add_argument('--render', action='store_true', help='Enable 3D visualization during training')
     args = parser.parse_args()
 
@@ -39,7 +40,8 @@ def main():
     env = QuadcopterEnv(
         num_agents=config['training']['num_agents'], 
         config=config['environment'],
-        render_mode='human' if args.render else None
+        render_mode='human' if args.render else None,
+        scenario=args.scenario
     )
 
     # Agent
