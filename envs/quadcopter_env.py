@@ -53,12 +53,18 @@ class QuadcopterEnv:
         
         # Ablation options
         self.sensor_noise_std = config.get('sensor_noise_std', 0.02) # 2% default
-        self.reward_type = config.get('reward_type', 'linear') # 'linear' or 'exponential'
+        self.reward_type = config.get('reward_type', 'exponential') # 'linear' or 'exponential'
         
         # Reward weights from config
         self.reward_config = config.get('rewards', {
-            'weights': {'transfer': 2.0, 'collision': 100.0, 'smoothness': 0.01, 'step_penalty': 0.1},
-            'goal_bonus': 100.0,
+            'weights': {
+                'transfer': 1.0, 
+                'collision': 25.0, 
+                'smoothness': 0.01, 
+                'step_penalty': 0.1,
+                'free_space': 0.05
+            },
+            'goal_bonus': 200.0,
             'collision_penalty': -50.0
         })
     
@@ -437,7 +443,12 @@ class QuadcopterEnv:
             
             r_smooth = -weights.get('smoothness', 0.01) * jerk_arr[i]
             r_step = -weights.get('step_penalty', 0.1)
-            rewards[i] = r_transfer + r_collision + r_smooth + r_step
+            
+            # Free space reward: Encourage staying in open areas
+            min_range = np.min(obs[i, :25]) * self.max_range
+            r_free = weights.get('free_space', 0.05) if min_range > 5.0 else 0.0
+            
+            rewards[i] = r_transfer + r_collision + r_smooth + r_step + r_free
             
             # Scenario logic
             if self.scenario == 'urban_canyon':
@@ -457,7 +468,7 @@ class QuadcopterEnv:
             if dist_to_goal < self.goal_dist:
                 if self.scenario != 'search_and_rescue':
                     self.agent_dones[i] = True
-                    rewards[i] += 100.0
+                    rewards[i] += self.reward_config.get('goal_bonus', 200.0)
             
             if d_min < self.collision_dist:
                 self.agent_dones[i] = True
