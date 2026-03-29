@@ -154,13 +154,13 @@ class MARDPG:
             # Target Q
             with torch.no_grad():
                 # For simplicity, we use zero-state for centralized critic target or stored-state?
-                # Let's use zero-state for critic as it's centralized and complex
-                target_q_seq, _ = self.critics_target[i](next_obs, next_actions_all, None, agent_idx=i)
+                # Let's use stored-state for critic as requested
+                target_q_seq, _ = self.critics_target[i](next_obs, next_actions_all, (h_init[i], c_init[i]), agent_idx=i)
                 target_q_seq = target_q_seq.squeeze(-1) # (batch, seq_len)
                 target_q = rewards[:, :, i] + self.gamma * target_q_seq * (1 - dones[:, :, i])
                 
             # Current Q
-            current_q_seq, _ = self.critics[i](obs, actions, None, agent_idx=i)
+            current_q_seq, _ = self.critics[i](obs, actions, (h_init[i], c_init[i]), agent_idx=i)
             current_q = current_q_seq.squeeze(-1) # (batch, seq_len)
             
             # Critic loss (MSE over sequence)
@@ -185,7 +185,7 @@ class MARDPG:
         actor_loss = 0
         for i in range(self.num_agents):
             # Centralized critic evaluation
-            q_values, _ = self.critics[i](obs, actor_actions_all, None, agent_idx=i)
+            q_values, _ = self.critics[i](obs, actor_actions_all, (h_init[i], c_init[i]), agent_idx=i)
             actor_loss += -q_values.mean()
         actor_loss /= self.num_agents
             
