@@ -133,15 +133,18 @@ def main():
                 
             next_obs, rewards, terminated, truncated, info = env.step(actions)
             
+            # Per-agent done flags for the buffer
+            dones = info['agent_dones'].astype(np.float32)
+            
+            # Episode is over if all agents are done or max steps reached
             done = terminated or truncated
-            dones = np.array([done] * env.num_agents, dtype=np.float32)
             
             if args.agent == 'mardpg':
                 # Convert hidden states to numpy for storage
                 hidden_np = []
                 for h, c in hidden:
                     hidden_np.append((h.cpu().numpy(), c.cpu().numpy()))
-                agent.memory.push(obs, np.array(actions), rewards, next_obs, dones, hidden_np)
+                agent.memory.push(obs, np.array(actions), rewards, next_obs, dones, hidden_np, done)
             else:
                 agent.memory.push(obs, np.array(actions), rewards, next_obs, dones)
             

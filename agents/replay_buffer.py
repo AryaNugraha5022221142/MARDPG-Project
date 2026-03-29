@@ -34,15 +34,16 @@ class SequenceReplayBuffer:
         self.current_episode = []
 
     def push(self, obs: np.ndarray, actions: np.ndarray, rewards: np.ndarray, 
-             next_obs: np.ndarray, dones: np.ndarray, hidden: List[Tuple[np.ndarray, np.ndarray]]):
+             next_obs: np.ndarray, dones: np.ndarray, hidden: List[Tuple[np.ndarray, np.ndarray]], 
+             episode_done: bool):
         """
         Adds a transition to the current episode.
         hidden: list of (h, c) for each agent at the START of this transition
+        episode_done: True if the entire episode is over (all agents done or max steps)
         """
         self.current_episode.append((obs, actions, rewards, next_obs, dones, hidden))
         
-        # If any agent is done, the episode ends
-        if np.any(dones):
+        if episode_done:
             self.buffer.append(self.current_episode)
             self.current_episode = []
 

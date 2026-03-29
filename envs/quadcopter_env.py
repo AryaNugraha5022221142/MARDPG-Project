@@ -49,6 +49,7 @@ class QuadcopterEnv:
         self.step_count = 0
         self.max_steps = config.get('max_steps', 2000)
         self.prev_dist_to_goal = np.zeros(self.num_agents, dtype=np.float32)
+        self.agent_dones = np.zeros(self.num_agents, dtype=bool)
         
         # Ablation options
         self.sensor_noise_std = config.get('sensor_noise_std', 0.02) # 2% default
@@ -146,6 +147,7 @@ class QuadcopterEnv:
             np.random.seed(seed)
             
         self.step_count = 0
+        self.agent_dones = np.zeros(self.num_agents, dtype=bool)
         self._generate_obstacles()
         
         if self.scenario == 'search_and_rescue':
@@ -200,114 +202,133 @@ class QuadcopterEnv:
                 self.goals[i] = pos.copy()
 
     def _get_observations(self) -> np.ndarray:
-        """Computes observations for all agents."""
+        """Computes observations for all agents using vectorized rangefinder."""
         obs_all = []
+        
+        # Precompute ray directions for all agents
+        h_angles = np.deg2rad(np.array([-60, -30, 0, 30, 60]))
+        v_angles = np.deg2rad(np.array([-30, -15, 0, 15, 30]))
+        
+        # Create a grid of angles: (25, 2)
+        ha_grid, va_grid = np.meshgrid(h_angles, v_angles)
+        ha_flat = ha_grid.flatten()
+        va_flat = va_grid.flatten()
+        
+        # Obstacle data for vectorization
+        sphere_pos = np.array([o['pos'] for o in self.obstacles if o['type'] == 'sphere'])
+        sphere_rad = np.array([o['radius'] for o in self.obstacles if o['type'] == 'sphere'])
+        
+        box_min = np.array([o['pos'] - o['size']/2 for o in self.obstacles if o['type'] == 'box'])
+        box_max = np.array([o['pos'] + o['size']/2 for o in self.obstacles if o['type'] == 'box'])
+        
         for i in range(self.num_agents):
             state = self.agents[i].state
             pos = state[0:3]
             yaw = state[5]
             goal = self.goals[i]
             
-            # Rangefinder (5x5 grid)
-            # 1. Rangefinder with Noise (Sim-to-Real)
-            h_angles = np.deg2rad(np.array([-60, -30, 0, 30, 60]))
-            v_angles = np.deg2rad(np.array([-30, -15, 0, 15, 30]))
+            # 1. Vectorized Rangefinder
+            # Ray directions in world frame: (25, 3)
+            ray_yaws = yaw + ha_flat
+            ray_pitches = va_flat
+            
+            dir_vecs = np.stack([
+                np.cos(ray_pitches) * np.cos(ray_yaws),
+                np.cos(ray_pitches) * np.sin(ray_yaws),
+                np.sin(ray_pitches)
+            ], axis=1) # (25, 3)
+            
             ranges = np.ones(25, dtype=np.float32) * self.max_range
             
-            # Add Gaussian noise to sensors
-            sensor_noise = np.random.normal(0, self.sensor_noise_std * self.max_range, 25)
-            
-            idx = 0
-            for ha in h_angles:
-                for va in v_angles:
-                    # Ray direction in world frame
-                    ray_yaw = yaw + ha
-                    ray_pitch = va # simplified
-                    dir_vec = np.array([
-                        np.cos(ray_pitch) * np.cos(ray_yaw),
-                        np.cos(ray_pitch) * np.sin(ray_yaw),
-                        np.sin(ray_pitch)
-                    ])
+            # Sphere intersections (Vectorized)
+            if len(sphere_pos) > 0:
+                # oc: (N_spheres, 3)
+                oc = pos - sphere_pos
+                # a = 1.0 (unit vectors)
+                # b: (25, N_spheres)
+                b = 2.0 * np.dot(dir_vecs, oc.T)
+                # c: (N_spheres,)
+                c = np.sum(oc**2, axis=1) - sphere_rad**2
+                
+                # discriminant: (25, N_spheres)
+                discriminant = b**2 - 4.0 * c # a=1
+                
+                mask = discriminant >= 0
+                sqrt_disc = np.sqrt(np.maximum(0, discriminant))
+                t1 = (-b - sqrt_disc) / 2.0
+                t2 = (-b + sqrt_disc) / 2.0
+                
+                # We want the smallest positive t
+                t_hits = np.where((t1 > 1e-4) & mask, t1, np.where((t2 > 1e-4) & mask, t2, self.max_range))
+                ranges = np.minimum(ranges, np.min(t_hits, axis=1))
+                
+            # Box intersections (AABB) - Vectorized
+            if len(box_min) > 0:
+                # dir_vecs: (25, 3), box_min: (N_boxes, 3)
+                # We need to broadcast to (25, N_boxes, 3)
+                inv_dir = 1.0 / (dir_vecs[:, np.newaxis, :] + 1e-8)
+                t1 = (box_min[np.newaxis, :, :] - pos) * inv_dir
+                t2 = (box_max[np.newaxis, :, :] - pos) * inv_dir
+                
+                t_min = np.max(np.minimum(t1, t2), axis=2) # (25, N_boxes)
+                t_max = np.min(np.maximum(t1, t2), axis=2) # (25, N_boxes)
+                
+                mask = (t_max >= t_min) & (t_max > 0)
+                t_hits = np.where(mask & (t_min > 0), t_min, self.max_range)
+                ranges = np.minimum(ranges, np.min(t_hits, axis=1))
+                
+            # Other agents (Vectorized)
+            other_indices = [j for j in range(self.num_agents) if i != j and not self.agent_dones[j]]
+            if other_indices:
+                other_pos = np.array([self.agents[j].state[0:3] for j in other_indices])
+                oc = other_pos - pos # (N_others, 3)
+                t = np.dot(dir_vecs, oc.T) # (25, N_others)
+                
+                # Projection: pos + t * dir_vec
+                # dist_to_ray: (25, N_others)
+                # This part is a bit tricky to vectorize fully without large memory
+                # But N_others is small (usually < 10)
+                for idx, j_idx in enumerate(other_indices):
+                    oc_j = oc[idx]
+                    t_j = t[:, idx]
+                    # dist_to_ray_sq = |oc_j|^2 - t_j^2
+                    dist_sq = np.sum(oc_j**2) - t_j**2
+                    mask = (t_j > 0) & (dist_sq < 0.3**2)
+                    d = t_j - np.sqrt(np.maximum(0, 0.3**2 - dist_sq))
+                    ranges = np.where(mask & (d < ranges), d, ranges)
                     
-                    min_dist = self.max_range
-                    
-                    # Check obstacles
-                    for obs in self.obstacles:
-                        if obs['type'] == 'sphere':
-                            obs_pos, obs_r = obs['pos'], obs['radius']
-                            oc = pos - obs_pos
-                            a = np.dot(dir_vec, dir_vec)          # =1 for unit dir
-                            b = 2.0 * np.dot(oc, dir_vec)
-                            c = np.dot(oc, oc) - obs_r ** 2
-                            discriminant = b * b - 4 * a * c
-                            if discriminant >= 0:
-                                sqrt_disc = np.sqrt(discriminant)
-                                t1 = (-b - sqrt_disc) / (2 * a)
-                                t2 = (-b + sqrt_disc) / (2 * a)
-                                # Use the nearest positive intersection
-                                for t_hit in (t1, t2):
-                                    if t_hit > 1e-4 and t_hit < min_dist:
-                                        min_dist = t_hit
-                                        break
-                        else: # Box
-                            # Ray-AABB intersection
-                            b_min = obs['pos'] - obs['size']/2
-                            b_max = obs['pos'] + obs['size']/2
-                            t1 = (b_min - pos) / (dir_vec + 1e-8)
-                            t2 = (b_max - pos) / (dir_vec + 1e-8)
-                            t_min = np.max(np.minimum(t1, t2))
-                            t_max = np.min(np.maximum(t1, t2))
-                            if t_max >= t_min and t_max > 0:
-                                if t_min > 0 and t_min < min_dist: min_dist = t_min
-                                    
-                    # Check other agents
-                    for j in range(self.num_agents):
-                        if i == j: continue
-                        other_pos = self.agents[j].state[0:3]
-                        oc = other_pos - pos
-                        t = np.dot(oc, dir_vec)
-                        if t > 0:
-                            proj = pos + t * dir_vec
-                            dist_to_ray = np.linalg.norm(other_pos - proj)
-                            if dist_to_ray < 0.3: # agent radius approx
-                                d = t - np.sqrt(0.3**2 - dist_to_ray**2)
-                                if d > 0 and d < min_dist:
-                                    min_dist = d
-                                    
-                    # Check walls
-                    for dim in range(3):
-                        if dir_vec[dim] > 1e-6:
-                            d = (self.arena_size[dim] - pos[dim]) / dir_vec[dim]
-                            if d > 0 and d < min_dist: min_dist = d
-                        elif dir_vec[dim] < -1e-6:
-                            d = (0.0 - pos[dim]) / dir_vec[dim]
-                            if d > 0 and d < min_dist: min_dist = d
-                            
-                    ranges[idx] = min_dist
-                    idx += 1
+            # Walls (Vectorized)
+            # dir_vecs: (25, 3), pos: (3,)
+            for dim in range(3):
+                # Positive direction
+                mask_p = dir_vecs[:, dim] > 1e-6
+                tp = (self.arena_size[dim] - pos[dim]) / (dir_vecs[:, dim] + 1e-8)
+                ranges = np.where(mask_p & (tp < ranges), tp, ranges)
+                
+                # Negative direction
+                mask_n = dir_vecs[:, dim] < -1e-6
+                tn = -pos[dim] / (dir_vecs[:, dim] - 1e-8)
+                ranges = np.where(mask_n & (tn < ranges), tn, ranges)
             
             # Apply noise and clip
+            sensor_noise = np.random.normal(0, self.sensor_noise_std * self.max_range, 25)
             ranges = np.clip(ranges + sensor_noise, 0, self.max_range)
             ranges_norm = ranges / self.max_range
             
-            # 2. Goal info (Relative)
+            # Goal info
             rel_pos = goal - pos
             dist_to_goal = np.linalg.norm(rel_pos)
             dist_norm = dist_to_goal / self.arena_diagonal
-            
             theta_goal = np.arctan2(rel_pos[1], rel_pos[0]) - yaw
-            sin_theta = np.sin(theta_goal)
-            cos_theta = np.cos(theta_goal)
-            
             phi_goal = np.arctan2(rel_pos[2], np.sqrt(rel_pos[0]**2 + rel_pos[1]**2))
-            sin_phi = np.sin(phi_goal)
-            cos_phi = np.cos(phi_goal)
             
-            # 3. Velocity Info (Crucial for momentum awareness)
-            vel_norm = self.agents[i].state[6:9] / 15.0 # Normalized by max expected speed
+            vel_norm = self.agents[i].state[6:9] / 15.0
             
-            # Total Obs Dim: 25 (rays) + 5 (goal) + 3 (vel) = 33
-            obs = np.concatenate([ranges_norm, [dist_norm, sin_theta, cos_theta, sin_phi, cos_phi], vel_norm])
+            obs = np.concatenate([
+                ranges_norm, 
+                [dist_norm, np.sin(theta_goal), np.cos(theta_goal), np.sin(phi_goal), np.cos(phi_goal)],
+                vel_norm
+            ])
             obs_all.append(obs)
             
         return np.array(obs_all, dtype=np.float32)
@@ -340,7 +361,7 @@ class QuadcopterEnv:
 
     def step(self, actions: np.ndarray) -> Tuple[np.ndarray, np.ndarray, bool, bool, Dict[str, Any]]:
         """
-        Executes one environment step.
+        Executes one environment step with per-agent termination.
         actions: (num_agents, 4) in range [-1, 1]
         """
         self.step_count += 1
@@ -348,48 +369,39 @@ class QuadcopterEnv:
         # Update dynamic obstacles
         for obs in self.obstacles:
             if obs.get('is_interceptor', False):
-                # Find nearest agent
+                # Find nearest active agent
                 nearest_dist = float('inf')
                 nearest_pos = None
-                for agent in self.agents:
-                    d = np.linalg.norm(agent.state[0:3] - obs['pos'])
+                for j in range(self.num_agents):
+                    if self.agent_dones[j]: continue
+                    d = np.linalg.norm(self.agents[j].state[0:3] - obs['pos'])
                     if d < nearest_dist:
                         nearest_dist = d
-                        nearest_pos = agent.state[0:3].copy()
+                        nearest_pos = self.agents[j].state[0:3].copy()
                 if nearest_pos is not None and nearest_dist > 0.1:
                     direction = (nearest_pos - obs['pos']) / nearest_dist
                     obs['pos'] = obs['pos'] + direction * 1.5 * self.dt
             elif np.any(obs['vel'] != 0):
-                # Oscillate with unique frequency and phase
                 phase = obs.get('phase', 0.0)
                 freq = obs.get('freq', 0.05)
                 obs['pos'] = obs['origin'] + obs['vel'] * np.sin(self.step_count * freq + phase)
         
-        # Action scaling (Continuous)
-        # vx: [-5, 5], vy: [-2, 2], vz: [-2, 2], yaw_rate: [-90, 90]
-        v_max = 5.0
-        v_side_max = 2.0
-        v_z_max = 2.0
-        yaw_rate_max = 90.0
-        
+        # Action scaling
+        v_max, v_side_max, v_z_max, yaw_rate_max = 5.0, 2.0, 2.0, 90.0
         jerk_arr = np.zeros(self.num_agents, dtype=np.float32)
         
-        # Apply actions
+        # Apply actions only to active agents
         for i in range(self.num_agents):
-            action = actions[i]
-            vx_cmd = action[0] * v_max
-            vy_cmd = action[1] * v_side_max
-            vz_cmd = action[2] * v_z_max
-            yaw_rate_cmd = action[3] * yaw_rate_max
+            if self.agent_dones[i]: continue
             
-            # Transform vx, vy to world frame based on yaw
+            action = actions[i]
+            vx_cmd, vy_cmd, vz_cmd, yaw_rate_cmd = action[0]*v_max, action[1]*v_side_max, action[2]*v_z_max, action[3]*yaw_rate_max
+            
             yaw = self.agents[i].state[5]
             vx_world = vx_cmd * np.cos(yaw) - vy_cmd * np.sin(yaw)
             vy_world = vx_cmd * np.sin(yaw) + vy_cmd * np.cos(yaw)
             world_cmd = np.array([vx_world, vy_world, vz_cmd, yaw_rate_cmd])
             
-            # Academic Metrics
-            # Jerk: Rate of change of acceleration (Indices 6:9 are velocity)
             old_vel = self.agents[i].state[6:9].copy()
             self.agents[i].step(world_cmd)
             new_vel = self.agents[i].state[6:9]
@@ -402,99 +414,72 @@ class QuadcopterEnv:
             
         obs = self._get_observations()
         rewards = np.zeros(self.num_agents, dtype=np.float32)
-        
-        terminated = False
-        truncated = self.step_count >= self.max_steps
-        
-        info = {'success': False, 'collision': False}
-        
-        success_count = 0
+        info = {'success': False, 'collision': False, 'agent_dones': self.agent_dones.copy()}
         
         for i in range(self.num_agents):
+            if self.agent_dones[i]: continue
+            
             pos = self.agents[i].state[0:3]
             goal = self.goals[i]
             dist_to_goal = np.linalg.norm(pos - goal)
             d_min = self._get_min_distance(i)
             
-            # Rewards (Thesis Proposed - Revised to prevent reward hacking)
             weights = self.reward_config['weights']
-            
-            # 1. Transfer Reward: Positive if moving closer, negative if moving away
             r_transfer = weights.get('transfer', 2.0) * (self.prev_dist_to_goal[i] - dist_to_goal)
             self.prev_dist_to_goal[i] = dist_to_goal
             
-            # 2. Collision Penalty: Zone-based penalty
             SAFETY_MARGIN = 2.0
             if d_min < SAFETY_MARGIN:
                 proximity_factor = 1.0 - (d_min / SAFETY_MARGIN)
-                if self.reward_type == 'exponential':
-                    # Exponential penalty: e^(k * proximity) - 1
-                    r_collision = -weights.get('collision', 10.0) * (np.exp(3.0 * proximity_factor) - 1.0)
-                else:
-                    # Default linear penalty
-                    r_collision = -weights.get('collision', 10.0) * proximity_factor
+                r_collision = -weights.get('collision', 10.0) * (np.exp(3.0 * proximity_factor) - 1.0 if self.reward_type == 'exponential' else proximity_factor)
             else:
                 r_collision = 0.0
             
-            # 3. Smoothness Penalty: Penalize high jerk
             r_smooth = -weights.get('smoothness', 0.01) * jerk_arr[i]
-            
-            # 4. Step Penalty: Constant penalty to prevent unproductive movements
             r_step = -weights.get('step_penalty', 0.1)
-            
             rewards[i] = r_transfer + r_collision + r_smooth + r_step
             
-            # Scenario-specific reward shaping
+            # Scenario logic
             if self.scenario == 'urban_canyon':
-                altitude = pos[2]
-                low_band = self.reward_config.get('corridor_low', [5.0, 15.0])
-                high_band = self.reward_config.get('corridor_high', [30.0, 45.0])
-                if low_band[0] <= altitude <= low_band[1] or high_band[0] <= altitude <= high_band[1]:
-                    rewards[i] += self.reward_config.get('corridor_bonus', 0.5)
-
+                alt = pos[2]
+                if (5.0 <= alt <= 15.0) or (30.0 <= alt <= 45.0):
+                    rewards[i] += 0.5
             elif self.scenario == 'search_and_rescue':
-                # Check if agent reached any unclaimed target
                 target_radius = self.reward_config.get('target_radius', 0.5)
                 for j, t_pos in enumerate(self.sar_targets):
-                    if j not in self.targets_claimed:
-                        if np.linalg.norm(pos - t_pos) < target_radius:
-                            self.targets_claimed.add(j)
-                            rewards[i] += self.reward_config.get('target_bonus', 50.0)
-                            self._update_sar_goals()
-                            break
-                
+                    if j not in self.targets_claimed and np.linalg.norm(pos - t_pos) < target_radius:
+                        self.targets_claimed.add(j)
+                        rewards[i] += 50.0
+                        self._update_sar_goals()
+                        break
+            
+            # Termination checks
             if dist_to_goal < self.goal_dist:
-                if self.scenario == 'search_and_rescue':
-                    # In SAR, goal is reached when all targets are claimed
-                    pass
-                else:
-                    success_count += 1
-                    rewards[i] += self.reward_config.get('goal_bonus', 100.0)
-                
+                if self.scenario != 'search_and_rescue':
+                    self.agent_dones[i] = True
+                    rewards[i] += 100.0
+            
             if d_min < self.collision_dist:
-                terminated = True
+                self.agent_dones[i] = True
                 info['collision'] = True
-                penalty = self.reward_config.get('collision_penalty', -50.0)
+                penalty = -50.0
                 if self.scenario == 'dynamic_intercept':
-                    # Check if collision was with an interceptor
-                    for obs in self.obstacles:
-                        if obs.get('is_interceptor', False):
-                            if np.linalg.norm(pos - obs['pos']) < (obs['radius'] + 0.3):
-                                penalty *= self.reward_config.get('interceptor_penalty_multiplier', 2.0)
-                                break
+                    for o in self.obstacles:
+                        if o.get('is_interceptor') and np.linalg.norm(pos - o['pos']) < (o['radius'] + 0.3):
+                            penalty *= 2.0; break
                 rewards[i] += penalty
             
-            # Update safety frontier
             self.safety_frontier[i] = min(self.safety_frontier[i], d_min)
-                
-        if self.scenario == 'search_and_rescue':
-            if len(self.targets_claimed) == len(self.sar_targets):
-                terminated = True
-                info['success'] = True
-        elif success_count == self.num_agents:
+
+        # Global termination
+        terminated = np.all(self.agent_dones)
+        if self.scenario == 'search_and_rescue' and len(self.targets_claimed) == len(self.sar_targets):
             terminated = True
             info['success'] = True
+        elif np.all(self.agent_dones) and not info['collision']:
+            info['success'] = True
             
+        truncated = self.step_count >= self.max_steps
         self.last_info = info
         return obs, rewards, terminated, truncated, info
 
