@@ -32,11 +32,12 @@ targets:
 
 rewards:
   weights:
-    transfer: 2.0
-    collision: 10.0       # was 100 — scaled down for linear proximity penalty
+    transfer: 1.0
+    collision: 25.0
     smoothness: 0.01
     step_penalty: 0.1
-  goal_bonus: 100.0
+    free_space: 0.05
+  goal_bonus: 200.0
   collision_penalty: -50.0
 
 environment:
@@ -50,3 +51,4 @@ environment:
   dynamic_ratio: 0.3
   max_steps: 2000          # was 1000 — 20 s at dt=0.01
   obs_dim: 33              # was 32 — added cos_phi
+  reward_type: "exponential"
