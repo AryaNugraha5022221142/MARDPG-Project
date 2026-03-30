@@ -34,24 +34,31 @@ class SequenceReplayBuffer:
         self.current_episode = []
 
     def push(self, obs: np.ndarray, actions: np.ndarray, rewards: np.ndarray, 
-             next_obs: np.ndarray, dones: np.ndarray, hidden: List[Tuple[np.ndarray, np.ndarray]], 
+             next_obs: np.ndarray, dones: np.ndarray, 
+             actor_hidden: List[Tuple[np.ndarray, np.ndarray]], 
+             critic_hidden: List[Tuple[np.ndarray, np.ndarray]],
              episode_done: bool):
         """
         Adds a transition to the current episode.
-        hidden: list of (h, c) for each agent at the START of this transition
-        episode_done: True if the entire episode is over (all agents done or max steps)
+        actor_hidden: list of (h, c) for each agent's actor at the START of this transition
+        critic_hidden: list of (h, c) for each agent's critic at the START of this transition
+        episode_done: True if the entire episode is over
         """
-        self.current_episode.append((obs, actions, rewards, next_obs, dones, hidden))
+        self.current_episode.append((obs, actions, rewards, next_obs, dones, actor_hidden, critic_hidden))
         
         if episode_done:
             self.buffer.append(self.current_episode)
             self.current_episode = []
 
-    def sample(self, batch_size: int, seq_len: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[Tuple[np.ndarray, np.ndarray]]]:
+    def clear(self):
+        """Clears the buffer for curriculum transitions."""
+        self.buffer.clear()
+        self.current_episode = []
+
+    def sample(self, batch_size: int, seq_len: int):
         """
         Samples a batch of sequences.
-        Returns stacked numpy arrays of shape (batch_size, seq_len, num_agents, ...)
-        And the initial hidden states for the sequence: (num_agents, num_layers, batch_size, hidden_dim)
+        Returns stacked numpy arrays and initial hidden states.
         """
         # Filter out episodes that are too short
         valid_episodes = [ep for ep in self.buffer if len(ep) >= seq_len]
@@ -65,10 +72,10 @@ class SequenceReplayBuffer:
         rewards_batch = []
         next_obs_batch = []
         dones_batch = []
-        init_hidden_batch = [] # List of (num_agents, (h, c))
+        actor_h_batch = [] # List of (num_agents, (h, c))
+        critic_h_batch = [] # List of (num_agents, (h, c))
         
         for ep in sampled_episodes:
-            # Randomly pick a starting point for the sequence
             if len(ep) > seq_len:
                 start_idx = random.randint(0, len(ep) - seq_len)
             else:
@@ -76,10 +83,10 @@ class SequenceReplayBuffer:
             
             seq = ep[start_idx : start_idx + seq_len]
             
-            # Initial hidden state for this sequence
-            init_hidden_batch.append(seq[0][5])
+            # Initial hidden states for this sequence
+            actor_h_batch.append(seq[0][5])
+            critic_h_batch.append(seq[0][6])
             
-            # If sequence is shorter than seq_len, pad it
             obs_seq = np.stack([item[0] for item in seq])
             act_seq = np.stack([item[1] for item in seq])
             rew_seq = np.stack([item[2] for item in seq])
@@ -100,24 +107,34 @@ class SequenceReplayBuffer:
             next_obs_batch.append(nobs_seq)
             dones_batch.append(done_seq)
             
-        # Reshape init_hidden_batch to (num_agents, num_layers, batch_size, hidden_dim)
-        # init_hidden_batch is list of length batch_size, each item is list of length num_agents, each item is (h, c)
-        num_agents = len(init_hidden_batch[0])
-        h_init = []
-        c_init = []
-        for i in range(num_agents):
-            h_agent = np.stack([hb[i][0] for hb in init_hidden_batch]) # (batch, num_layers, 1, hidden_dim) -> wait, select_actions returns (num_layers, 1, hidden_dim)
-            c_agent = np.stack([hb[i][1] for hb in init_hidden_batch])
-            
-            # We want (num_layers, batch, hidden_dim) for LSTM
-            h_agent = np.transpose(h_agent.squeeze(2), (1, 0, 2))
-            c_agent = np.transpose(c_agent.squeeze(2), (1, 0, 2))
-            
-            h_init.append(h_agent)
-            c_init.append(c_agent)
+        def process_hidden(h_batch):
+            num_agents = len(h_batch[0])
+            h_init = []
+            c_init = []
+            for i in range(num_agents):
+                # h_agent_batch: (batch, num_layers, 1, hidden_dim)
+                h_agent_batch = np.stack([hb[i][0] for hb in h_batch])
+                c_agent_batch = np.stack([hb[i][1] for hb in h_batch])
+                
+                # Reshape to (num_layers, batch, hidden_dim)
+                # First, remove the singleton dimension at index 2
+                h_agent_batch = np.squeeze(h_agent_batch, axis=2)
+                c_agent_batch = np.squeeze(c_agent_batch, axis=2)
+                
+                # Then transpose from (batch, num_layers, hidden_dim) to (num_layers, batch, hidden_dim)
+                h_agent_batch = np.transpose(h_agent_batch, (1, 0, 2))
+                c_agent_batch = np.transpose(c_agent_batch, (1, 0, 2))
+                
+                h_init.append(h_agent_batch)
+                c_init.append(c_agent_batch)
+            return h_init, c_init
+
+        actor_h_init, actor_c_init = process_hidden(actor_h_batch)
+        critic_h_init, critic_c_init = process_hidden(critic_h_batch)
             
         return (np.stack(obs_batch), np.stack(actions_batch), np.stack(rewards_batch), 
-                np.stack(next_obs_batch), np.stack(dones_batch), (h_init, c_init))
+                np.stack(next_obs_batch), np.stack(dones_batch), 
+                (actor_h_init, actor_c_init), (critic_h_init, critic_c_init))
 
     def __len__(self) -> int:
         return len(self.buffer)

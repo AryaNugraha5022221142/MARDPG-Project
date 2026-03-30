@@ -72,7 +72,9 @@ def main():
     
     for ep in range(args.episodes):
         obs, _ = env.reset()
-        hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
+        if args.agent == 'mardpg':
+            actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
+            critic_hidden = [agent.critics[i].init_hidden(1, device) for i in range(env.num_agents)]
         
         done = False
         steps = 0
@@ -86,7 +88,7 @@ def main():
                 ep_trajectories[i].append(env.agents[i].state[:3].copy())
                 
             if args.agent in ['mardpg', 'iddpg']:
-                actions, hidden = agent.select_actions(obs, hidden, noise_scale=0.0) # Greedy
+                actions, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden, noise_scale=0.0) # Greedy
             else:
                 actions = agent.select_actions(obs, noise_scale=0.0)
                 

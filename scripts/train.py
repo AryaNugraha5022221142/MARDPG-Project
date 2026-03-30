@@ -117,7 +117,8 @@ def main():
     for episode in range(1, num_episodes + 1):
         obs, _ = env.reset()
         if args.agent == 'mardpg':
-            hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
+            actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
+            critic_hidden = [agent.critics[i].init_hidden(1, device) for i in range(env.num_agents)]
         
         episode_reward = 0
         done = False
@@ -127,7 +128,16 @@ def main():
                 env.render()
                 
             if args.agent == 'mardpg':
-                actions, hidden = agent.select_actions(obs, hidden, noise_scale=epsilon)
+                # Store hidden states at the START of the transition
+                actor_hidden_np = []
+                for h, c in actor_hidden:
+                    actor_hidden_np.append((h.cpu().numpy(), c.cpu().numpy()))
+                
+                critic_hidden_np = []
+                for h, c in critic_hidden:
+                    critic_hidden_np.append((h.cpu().numpy(), c.cpu().numpy()))
+                
+                actions, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden, noise_scale=epsilon)
             else:
                 actions = agent.select_actions(obs, epsilon)
                 
@@ -140,11 +150,7 @@ def main():
             done = terminated or truncated
             
             if args.agent == 'mardpg':
-                # Convert hidden states to numpy for storage
-                hidden_np = []
-                for h, c in hidden:
-                    hidden_np.append((h.cpu().numpy(), c.cpu().numpy()))
-                agent.memory.push(obs, np.array(actions), rewards, next_obs, dones, hidden_np, done)
+                agent.memory.push(obs, np.array(actions), rewards, next_obs, dones, actor_hidden_np, critic_hidden_np, done)
             else:
                 agent.memory.push(obs, np.array(actions), rewards, next_obs, dones)
             
@@ -171,6 +177,10 @@ def main():
             if len(recent_success) == 100 and success_rate >= success_threshold and curriculum_level < 4:
                 curriculum_level += 1
                 env.set_curriculum_level(curriculum_level)
+                # Flush buffer on curriculum change to prevent stale data corruption
+                if hasattr(agent.memory, 'clear'):
+                    agent.memory.clear()
+                    print(f"Curriculum Level Up! Level: {curriculum_level}. Buffer cleared.")
                 # Reset success buffer to allow agent to adapt to new difficulty
                 recent_success.clear()
         

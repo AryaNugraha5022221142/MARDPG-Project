@@ -81,25 +81,32 @@ class MARDPG:
         buffer_size = config['memory'].get('buffer_size', 1000)
         self.memory = SequenceReplayBuffer(buffer_size)
 
-    def select_actions(self, obs: np.ndarray, hidden: List[Tuple[torch.Tensor, torch.Tensor]], 
-                       noise_scale: float = 0.1) -> Tuple[np.ndarray, List[Tuple[torch.Tensor, torch.Tensor]]]:
+    def select_actions(self, obs: np.ndarray, 
+                       actor_hidden: List[Tuple[torch.Tensor, torch.Tensor]], 
+                       critic_hidden: List[Tuple[torch.Tensor, torch.Tensor]],
+                       noise_scale: float = 0.1) -> Tuple[np.ndarray, List[Tuple[torch.Tensor, torch.Tensor]], List[Tuple[torch.Tensor, torch.Tensor]]]:
         """
-        Selects continuous actions for all agents.
+        Selects continuous actions for all agents and updates both actor and critic hidden states.
         obs: (num_agents, obs_dim)
-        hidden: list of (h, c) for each agent
+        actor_hidden: list of (h, c) for each agent's actor
+        critic_hidden: list of (h, c) for each agent's critic
         """
         actions = []
-        new_hidden = []
+        new_actor_hidden = []
+        new_critic_hidden = []
         
         self.actor.eval()
+        for c in self.critics: c.eval()
+        
         with torch.no_grad():
+            # 1. Select actions using Actor
             for i in range(self.num_agents):
                 obs_tensor = torch.FloatTensor(obs[i]).unsqueeze(0).to(self.device) # (1, obs_dim)
-                h, c = hidden[i]
+                h, c = actor_hidden[i]
                 
                 # Actor returns (batch, 1, action_dim) for single step
                 action, (new_h, new_c) = self.actor(obs_tensor, (h, c))
-                new_hidden.append((new_h, new_c))
+                new_actor_hidden.append((new_h, new_c))
                 
                 action = action.cpu().numpy().flatten()
                 
@@ -109,9 +116,20 @@ class MARDPG:
                 
                 action = np.clip(action, -1.0, 1.0)
                 actions.append(action)
+            
+            actions_np = np.array(actions)
+            actions_tensor = torch.FloatTensor(actions_np).unsqueeze(0).unsqueeze(0).to(self.device) # (1, 1, num_agents, action_dim)
+            obs_all_tensor = torch.FloatTensor(obs).unsqueeze(0).unsqueeze(0).to(self.device) # (1, 1, num_agents, obs_dim)
+            
+            # 2. Update Critic hidden states (even if we don't use the Q-values)
+            for i in range(self.num_agents):
+                h, c = critic_hidden[i]
+                _, (new_h, new_c) = self.critics[i](obs_all_tensor, actions_tensor, (h, c), agent_idx=i)
+                new_critic_hidden.append((new_h, new_c))
                 
         self.actor.train()
-        return np.array(actions), new_hidden
+        for c in self.critics: c.train()
+        return actions_np, new_actor_hidden, new_critic_hidden
 
     def update(self) -> Dict[str, float]:
         """
@@ -120,9 +138,10 @@ class MARDPG:
         if len(self.memory) < self.batch_size:
             return {}
             
-        # Sample batch of sequences: (batch, seq_len, num_agents, dim)
-        # init_hidden: (h_init, c_init) where each is list of (num_layers, batch, hidden_dim)
-        obs_seq, act_seq, rew_seq, nobs_seq, done_seq, init_hidden = self.memory.sample(self.batch_size, self.seq_len)
+        # Sample batch of sequences
+        # actor_init: (h_init, c_init) for actors
+        # critic_init: (h_init, c_init) for critics
+        obs_seq, act_seq, rew_seq, nobs_seq, done_seq, actor_init, critic_init = self.memory.sample(self.batch_size, self.seq_len)
         
         # Convert to tensors
         obs = torch.FloatTensor(obs_seq).to(self.device)
@@ -131,9 +150,13 @@ class MARDPG:
         next_obs = torch.FloatTensor(nobs_seq).to(self.device)
         dones = torch.FloatTensor(done_seq).to(self.device)
         
-        h_init, c_init = init_hidden
-        h_init = [torch.FloatTensor(h).to(self.device) for h in h_init]
-        c_init = [torch.FloatTensor(c).to(self.device) for c in c_init]
+        h_actor, c_actor = actor_init
+        h_actor = [torch.FloatTensor(h).to(self.device) for h in h_actor]
+        c_actor = [torch.FloatTensor(c).to(self.device) for c in c_actor]
+        
+        h_critic, c_critic = critic_init
+        h_critic = [torch.FloatTensor(h).to(self.device) for h in h_critic]
+        c_critic = [torch.FloatTensor(c).to(self.device) for c in c_critic]
         
         # 1. Update Critics
         critic_losses = []
@@ -142,25 +165,23 @@ class MARDPG:
         with torch.no_grad():
             next_actions_all = []
             for i in range(self.num_agents):
-                # Actor target needs (batch, seq_len, obs_dim)
                 agent_next_obs = next_obs[:, :, i, :]
-                # Use current hidden state for target actor? 
-                # Standard practice is to use zero-state or stored-state for target actor too
-                next_act, _ = self.actor_target(agent_next_obs, (h_init[i], c_init[i]))
+                # Use stored actor state for target actor
+                next_act, _ = self.actor_target(agent_next_obs, (h_actor[i], c_actor[i]))
                 next_actions_all.append(next_act)
             next_actions_all = torch.stack(next_actions_all, dim=2) # (batch, seq_len, num_agents, action_dim)
             
         for i in range(self.num_agents):
             # Target Q
             with torch.no_grad():
-                # For simplicity, we use zero-state for centralized critic target or stored-state?
-                # Let's use stored-state for critic as requested
-                target_q_seq, _ = self.critics_target[i](next_obs, next_actions_all, (h_init[i], c_init[i]), agent_idx=i)
+                # Use stored critic state for target critic
+                target_q_seq, _ = self.critics_target[i](next_obs, next_actions_all, (h_critic[i], c_critic[i]), agent_idx=i)
                 target_q_seq = target_q_seq.squeeze(-1) # (batch, seq_len)
                 target_q = rewards[:, :, i] + self.gamma * target_q_seq * (1 - dones[:, :, i])
                 
             # Current Q
-            current_q_seq, _ = self.critics[i](obs, actions, (h_init[i], c_init[i]), agent_idx=i)
+            # Use stored critic state for current critic
+            current_q_seq, _ = self.critics[i](obs, actions, (h_critic[i], c_critic[i]), agent_idx=i)
             current_q = current_q_seq.squeeze(-1) # (batch, seq_len)
             
             # Critic loss (MSE over sequence)
@@ -174,18 +195,18 @@ class MARDPG:
             self.critic_optimizers[i].step()
             
         # 2. Update Actor
-        # We need to compute gradients through the critic
         actor_actions_all = []
         for i in range(self.num_agents):
             agent_obs = obs[:, :, i, :]
-            act, _ = self.actor(agent_obs, (h_init[i], c_init[i]))
+            # Use stored actor state for actor update
+            act, _ = self.actor(agent_obs, (h_actor[i], c_actor[i]))
             actor_actions_all.append(act)
         actor_actions_all = torch.stack(actor_actions_all, dim=2) # (batch, seq_len, num_agents, action_dim)
         
         actor_loss = 0
         for i in range(self.num_agents):
-            # Centralized critic evaluation
-            q_values, _ = self.critics[i](obs, actor_actions_all, (h_init[i], c_init[i]), agent_idx=i)
+            # Use stored critic state for actor gradient calculation
+            q_values, _ = self.critics[i](obs, actor_actions_all, (h_critic[i], c_critic[i]), agent_idx=i)
             actor_loss += -q_values.mean()
         actor_loss /= self.num_agents
             
