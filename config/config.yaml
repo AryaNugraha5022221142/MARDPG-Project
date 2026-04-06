@@ -52,3 +52,11 @@ environment:
   max_steps: 2000          # was 1000 — 20 s at dt=0.01
   obs_dim: 33              # was 32 — added cos_phi
   reward_type: "exponential"
+
+logging:
+  log_dir: "logs"
+  checkpoint_dir: "checkpoints"
+  log_interval: 100
+  save_interval: 500
+  use_wandb: false
+  wandb_project: "mardpg-thesis"

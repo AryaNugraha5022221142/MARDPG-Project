@@ -58,8 +58,8 @@ const DroneModel = ({ pos, yaw, color }: { pos: [number, number, number], yaw: n
         ))
       )}
       {/* Direction indicator */}
-      <mesh position={[0.3, 0, 0.05]}>
-        <coneGeometry args={[0.1, 0.3, 16]} rotation={[0, 0, -Math.PI / 2]} />
+      <mesh position={[0.3, 0, 0.05]} rotation={[0, 0, -Math.PI / 2]}>
+        <coneGeometry args={[0.1, 0.3, 16]} />
         <meshStandardMaterial color="white" />
       </mesh>
     </group>
@@ -141,8 +141,8 @@ const Arena = ({ size }: { size: [number, number, number] }) => {
       />
 
       {/* Boundary Lines */}
-      <lineSegments>
-        <edgesGeometry args={new THREE.BoxGeometry(size[0], size[1], size[2])} />
+      <lineSegments position={[size[0] / 2, size[1] / 2, size[2] / 2]}>
+        <edgesGeometry args={[new THREE.BoxGeometry(size[0], size[1], size[2])]} />
         <lineBasicMaterial color="#333" />
       </lineSegments>
     </group>
