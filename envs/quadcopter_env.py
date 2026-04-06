@@ -396,7 +396,7 @@ class QuadcopterEnv:
                 obs['pos'] = obs['origin'] + obs['vel'] * np.sin(self.step_count * freq + phase)
         
         # Action scaling
-        v_max, v_side_max, v_z_max, yaw_rate_max = 5.0, 2.0, 2.0, 90.0
+        v_max, v_side_max, v_z_max, yaw_rate_max = 3.5, 3.5, 3.5, 45.0
         jerk_arr = np.zeros(self.num_agents, dtype=np.float32)
         
         # Apply actions only to active agents
@@ -444,7 +444,7 @@ class QuadcopterEnv:
             else:
                 r_collision = 0.0
             
-            r_smooth = -weights.get('smoothness', 0.01) * jerk_arr[i]
+            r_smooth = -weights.get('smoothness', 0.01) * np.sum(actions[i]**2)
             r_step = -weights.get('step_penalty', 0.1)
             
             # Free space reward: Encourage staying in open areas

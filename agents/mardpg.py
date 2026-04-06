@@ -195,19 +195,30 @@ class MARDPG:
             self.critic_optimizers[i].step()
             
         # 2. Update Actor
-        actor_actions_all = []
-        for i in range(self.num_agents):
-            agent_obs = obs[:, :, i, :]
-            # Use stored actor state for actor update
-            act, _ = self.actor(agent_obs, (h_actor[i], c_actor[i]))
-            actor_actions_all.append(act)
-        actor_actions_all = torch.stack(actor_actions_all, dim=2) # (batch, seq_len, num_agents, action_dim)
-        
         actor_loss = 0
         for i in range(self.num_agents):
+            # Only recompute agent i's action from current policy
+            agent_i_obs = obs[:, :, i, :]
+            agent_i_act, _ = self.actor(agent_i_obs, (h_actor[i], c_actor[i]))
+            
+            # Build joint action: agent i from current policy, others from buffer
+            with torch.no_grad():
+                other_acts = []
+                for j in range(self.num_agents):
+                    if j == i:
+                        other_acts.append(agent_i_act)
+                    else:
+                        agent_j_obs = obs[:, :, j, :]
+                        a_j, _ = self.actor(agent_j_obs, (h_actor[j], c_actor[j]))
+                        other_acts.append(a_j.detach())  # detach — no grad for j!=i
+            
+            # Stack: (batch, seq, N, action_dim)
+            joint_actions = torch.stack(other_acts, dim=2)
+            
             # Use stored critic state for actor gradient calculation
-            q_values, _ = self.critics[i](obs, actor_actions_all, (h_critic[i], c_critic[i]), agent_idx=i)
+            q_values, _ = self.critics[i](obs, joint_actions, (h_critic[i], c_critic[i]), agent_idx=i)
             actor_loss += -q_values.mean()
+            
         actor_loss /= self.num_agents
             
         self.actor_optimizer.zero_grad()

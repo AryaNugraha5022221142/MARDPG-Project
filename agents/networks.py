@@ -7,14 +7,15 @@ from typing import Tuple
 class ActorLSTM(nn.Module):
     """
     LSTM-based Actor network shared across all agents.
-    Outputs continuous actions in [-1, 1].
+    Outputs continuous actions in [-3.5, 3.5].
     """
     def __init__(self, input_dim: int = 33, hidden_dim: int = 128, num_layers: int = 1, output_dim: int = 4, dropout: float = 0.1):
         super(ActorLSTM, self).__init__()
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
         
-        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True)
+        self.fc_embed = nn.Linear(input_dim, hidden_dim)  # Eq. 3.25
+        self.lstm = nn.LSTM(hidden_dim, hidden_dim, num_layers, batch_first=True)
         self.fc1 = nn.Linear(hidden_dim, 256)
         self.fc2 = nn.Linear(256, 128)
         self.fc3 = nn.Linear(128, output_dim)
@@ -37,12 +38,13 @@ class ActorLSTM(nn.Module):
         if hidden is None:
             hidden = self.init_hidden(x.size(0), x.device)
             
+        x = F.relu(self.fc_embed(x))         # embed before LSTM
         out, hidden = self.lstm(x, hidden)
         
         # Process all time steps for sequence training
         x = F.relu(self.fc1(out))
         x = F.relu(self.fc2(x))
-        actions = torch.tanh(self.fc3(x))
+        actions = 3.5 * torch.tanh(self.fc3(x))
         
         if is_single_step:
             actions = actions.squeeze(1)
