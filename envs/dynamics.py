@@ -19,6 +19,40 @@ class QuadcopterDynamics:
         self.state[0:3] = start_pos
         self.state[5] = start_yaw
 
+    def rl_step(self, velocity_ref: np.ndarray, lqr, M: int = 10):
+        """
+        Outer RL step: runs M inner LQR steps.
+        velocity_ref: [vx*, vy*, vz*, yaw_rate*] from RL policy
+        """
+        yaw_rate_cmd_rad = np.deg2rad(velocity_ref[3])
+        
+        for _ in range(M):
+            for j, axis in enumerate([0, 1, 2]):
+                # Eq. 3.68: Reference generation
+                p_ref = self.state[axis] + velocity_ref[j] * self.dt
+                v_ref = velocity_ref[j]
+                
+                # Eq. 3.69: LQR feedback + feedforward
+                u_j = lqr.compute_input(p_ref, v_ref, self.state[axis], self.state[6+j])
+                u_j = np.clip(u_j, -5.0, 5.0)  # Actuator saturation Eq. 3.74
+                
+                # Apply u_j to plant dynamics (ZOH update, Eq. 3.16)
+                alpha = np.exp(-self.dt / self.tau)
+                self.state[6+j] = alpha * self.state[6+j] + (1 - alpha) * u_j
+                self.state[axis] += self.state[6+j] * self.dt
+            
+            # Yaw update (inner loop)
+            psi = self.state[5]
+            psi_new = psi + yaw_rate_cmd_rad * self.dt
+            self.state[5] = (psi_new + np.pi) % (2 * np.pi) - np.pi
+            
+        # Roll and pitch estimation (simplified attitude tracking)
+        vx_cmd, vy_cmd, vz_cmd = velocity_ref[0:3]
+        self.state[3] = np.arctan2(vy_cmd, np.sqrt(vx_cmd**2 + 0.01)) * 0.5
+        self.state[4] = np.arctan2(vz_cmd, np.sqrt(vx_cmd**2 + vy_cmd**2 + 0.01)) * 0.5
+        
+        return self.state.copy()
+
     def step(self, velocity_cmd: np.ndarray):
         """
         Updates the quadcopter state based on velocity commands.

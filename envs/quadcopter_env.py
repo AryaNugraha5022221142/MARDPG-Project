@@ -2,6 +2,7 @@
 import numpy as np
 from typing import Tuple, Dict, Any, List
 from .dynamics import QuadcopterDynamics
+from .lqr_controller import PerAxisLQR
 
 class QuadcopterEnv:
     """
@@ -36,10 +37,12 @@ class QuadcopterEnv:
         self.goal_dist = config['goal_distance']
         self.dt = config['dt']
         self.dynamic_ratio = config.get('dynamic_ratio', 0.3)
+        self.M = config.get('inner_steps', 10)
         
         self.arena_diagonal = np.linalg.norm(self.arena_size)
         
         self.agents = [QuadcopterDynamics(dt=self.dt) for _ in range(self.num_agents)]
+        self.lqr = PerAxisLQR(dt=self.dt)
         
         # Dynamic goals based on arena size
         self.goals = np.zeros((self.num_agents, 3), dtype=np.float32)
@@ -386,7 +389,7 @@ class QuadcopterEnv:
                         nearest_pos = self.agents[j].state[0:3].copy()
                 if nearest_pos is not None and nearest_dist > 0.1:
                     direction = (nearest_pos - obs['pos']) / nearest_dist
-                    obs['pos'] = obs['pos'] + direction * 1.5 * self.dt
+                    obs['pos'] = obs['pos'] + direction * 1.5 * (self.dt * self.M)
             elif np.any(obs['vel'] != 0):
                 phase = obs.get('phase', 0.0)
                 freq = obs.get('freq', 0.05)
@@ -409,11 +412,11 @@ class QuadcopterEnv:
             world_cmd = np.array([vx_world, vy_world, vz_cmd, yaw_rate_cmd])
             
             old_vel = self.agents[i].state[6:9].copy()
-            self.agents[i].step(world_cmd)
+            self.agents[i].rl_step(world_cmd, self.lqr, M=self.M)
             new_vel = self.agents[i].state[6:9]
             
-            accel = (new_vel - old_vel) / self.dt
-            jerk_val = np.linalg.norm(accel - self.prev_accel[i]) / self.dt
+            accel = (new_vel - old_vel) / (self.dt * self.M)
+            jerk_val = np.linalg.norm(accel - self.prev_accel[i]) / (self.dt * self.M)
             self.total_jerk[i] += jerk_val
             self.prev_accel[i] = accel.copy()
             jerk_arr[i] = jerk_val
