@@ -38,7 +38,7 @@ class MADDPG:
             }
         self.config = config
         
-        self.gamma = 0.99
+        self.gamma = 0.99 ** config.get('inner_steps', 10)
         self.tau = config['targets'].get('update_rate', 0.01)
         self.batch_size = config['memory'].get('batch_size', 128)
         self.max_grad_norm = config['learning'].get('max_grad_norm', 1.0)
@@ -79,11 +79,11 @@ class MADDPG:
         with torch.no_grad():
             for i in range(self.num_agents):
                 obs_tensor = torch.FloatTensor(obs[i]).unsqueeze(0).to(self.device) # (1, obs_dim)
-                action = self.actor(obs_tensor).cpu().numpy().squeeze(0)
+                action = self.actor(obs_tensor, agent_idx=i).cpu().numpy().squeeze(0)
                 
                 if noise_scale > 0:
                     noise = self.noise.sample() * noise_scale
-                    action = np.clip(action + noise, -1.0, 1.0)
+                    action = np.clip(action + noise, -3.5, 3.5)
                 
                 actions.append(action)
                 
@@ -112,7 +112,7 @@ class MADDPG:
             next_actions = []
             for i in range(self.num_agents):
                 agent_next_obs = next_obs[:, i, :]
-                next_act = self.actor_target(agent_next_obs)
+                next_act = self.actor_target(agent_next_obs, agent_idx=i)
                 next_actions.append(next_act)
                 
             next_actions = torch.stack(next_actions, dim=1) # (batch, num_agents, action_dim)
@@ -133,20 +133,28 @@ class MADDPG:
             torch.nn.utils.clip_grad_norm_(self.critics[i].parameters(), self.max_grad_norm)
             self.critic_optimizers[i].step()
             
-        # 2. Update Actor
-        curr_actions = []
-        for i in range(self.num_agents):
-            agent_obs = obs[:, i, :]
-            act = self.actor(agent_obs)
-            curr_actions.append(act)
-            
-        curr_actions = torch.stack(curr_actions, dim=1)
-        curr_actions_full = curr_actions.view(self.batch_size, -1)
-        
         actor_loss = 0
         for i in range(self.num_agents):
-            q_values = self.critics[i](obs_full, curr_actions_full)
+            # Recompute agent i's action
+            agent_i_obs = obs[:, i, :]
+            agent_i_act = self.actor(agent_i_obs, agent_idx=i)
+            
+            # Build joint action with other agents' actions detached
+            other_acts = []
+            for j in range(self.num_agents):
+                if j == i:
+                    other_acts.append(agent_i_act)
+                else:
+                    agent_j_obs = obs[:, j, :]
+                    a_j = self.actor(agent_j_obs, agent_idx=j)
+                    other_acts.append(a_j.detach())
+            
+            joint_actions = torch.stack(other_acts, dim=1)
+            joint_actions_full = joint_actions.view(self.batch_size, -1)
+            
+            q_values = self.critics[i](obs_full, joint_actions_full)
             actor_loss += -q_values.mean()
+            
         actor_loss /= self.num_agents
             
         self.actor_optimizer.zero_grad()

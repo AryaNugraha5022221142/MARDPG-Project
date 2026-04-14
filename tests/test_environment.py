@@ -7,7 +7,7 @@ def test_environment_reset():
     env = QuadcopterEnv(num_agents=3)
     obs, info = env.reset()
     
-    assert obs.shape == (3, 33), f"Expected obs shape (3, 33), got {obs.shape}"
+    assert obs.shape == (3, 34), f"Expected obs shape (3, 34), got {obs.shape}"
     assert isinstance(info, dict)
 
 def test_environment_step():
@@ -18,7 +18,7 @@ def test_environment_step():
     actions = np.zeros((3, 4))
     obs, rewards, terminated, truncated, info = env.step(actions)
     
-    assert obs.shape == (3, 33)
+    assert obs.shape == (3, 34)
     assert rewards.shape == (3,)
     assert isinstance(terminated, bool)
     assert isinstance(truncated, bool)

@@ -60,9 +60,10 @@ def main():
     )
 
     # Agent
+    obs_dim = config['environment'].get('obs_dim', 34)
     if args.agent in ['mardpg', 'iddpg']:
         agent = MARDPG(
-            obs_dim=33, 
+            obs_dim=obs_dim, 
             action_dim=4, 
             num_agents=config['training']['num_agents'], 
             config=config, 
@@ -71,7 +72,7 @@ def main():
         )
     else:
         agent = MADDPG(
-            obs_dim=33, 
+            obs_dim=obs_dim, 
             action_dim=4, 
             num_agents=config['training']['num_agents'], 
             config=config, 
@@ -155,7 +156,7 @@ def main():
                 agent.memory.push(obs, np.array(actions), rewards, next_obs, dones)
             
             # Only update if we have enough episodes in the buffer
-            if len(agent.memory) >= config['memory'].get('batch_size', 32):
+            if len(agent.memory) >= config['memory'].get('batch_size', 32) and env.step_count % config.get('update_interval', 10) == 0:
                 loss_dict = agent.update()
             else:
                 loss_dict = {}

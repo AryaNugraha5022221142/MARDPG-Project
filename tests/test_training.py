@@ -10,10 +10,10 @@ def test_buffer():
     
     buffer = ReplayBuffer(capacity=100)
     
-    obs = np.random.randn(3, 33)
+    obs = np.random.randn(3, 34)
     actions = np.array([0, 1, 2])
     rewards = np.array([0.1, 0.2, 0.3])
-    next_obs = np.random.randn(3, 33)
+    next_obs = np.random.randn(3, 34)
     dones = np.array([False, False, False])
     
     buffer.push(obs, actions, rewards, next_obs, dones)
@@ -26,16 +26,16 @@ def test_buffer():
         
     b_obs, b_actions, b_rewards, b_next_obs, b_dones = buffer.sample(batch_size=5)
     
-    assert b_obs.shape == (5, 3, 33)
+    assert b_obs.shape == (5, 3, 34)
     assert b_actions.shape == (5, 3)
     assert b_rewards.shape == (5, 3)
-    assert b_next_obs.shape == (5, 3, 33)
+    assert b_next_obs.shape == (5, 3, 34)
     assert b_dones.shape == (5, 3)
 
 def test_action_selection():
-    agent = MARDPG(obs_dim=33, action_dim=4, num_agents=3, device='cpu')
+    agent = MARDPG(obs_dim=34, action_dim=4, num_agents=3, device='cpu')
     
-    obs = np.random.randn(3, 33).astype(np.float32)
+    obs = np.random.randn(3, 34).astype(np.float32)
     actor_hidden = [agent.actor.init_hidden(1, 'cpu') for _ in range(3)]
     critic_hidden = [agent.critics[0].init_hidden(1, 'cpu') for _ in range(3)]
     
@@ -47,23 +47,23 @@ def test_action_selection():
     assert len(new_critic_hidden) == 3
 
 def test_network_update():
-    agent = MARDPG(obs_dim=33, action_dim=4, num_agents=3, device='cpu')
+    agent = MARDPG(obs_dim=34, action_dim=4, num_agents=3, device='cpu')
     
     # Fill buffer with episodes
     for _ in range(agent.batch_size + 10):
         episode = []
-        for _ in range(20): # seq_len = 16
-            obs = np.random.randn(3, 33).astype(np.float32)
+        for step in range(20): # seq_len = 16
+            obs = np.random.randn(3, 34).astype(np.float32)
             actions = np.random.randn(3, 4).astype(np.float32)
             rewards = np.random.randn(3).astype(np.float32)
-            next_obs = np.random.randn(3, 33).astype(np.float32)
+            next_obs = np.random.randn(3, 34).astype(np.float32)
             dones = np.zeros(3, dtype=np.float32)
-            episode.append((obs, actions, rewards, next_obs, dones))
-        
-        dones = np.ones(3, dtype=np.float32)
-        agent.memory.push(obs, actions, rewards, next_obs, dones)
-        # SequenceReplayBuffer push logic: it appends to current_episode and pushes to buffer when done
-        # My manual push above might be slightly off for SequenceReplayBuffer if I don't follow its internal state
+            
+            actor_hidden = [(np.zeros((1, 1, 128)), np.zeros((1, 1, 128))) for _ in range(3)]
+            critic_hidden = [(np.zeros((1, 1, 128)), np.zeros((1, 1, 128))) for _ in range(3)]
+            
+            episode_done = (step == 19)
+            agent.memory.push(obs, actions, rewards, next_obs, dones, actor_hidden, critic_hidden, episode_done)
         
     loss_dict = agent.update()
     

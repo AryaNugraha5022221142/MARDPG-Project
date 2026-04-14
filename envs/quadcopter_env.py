@@ -4,6 +4,18 @@ from typing import Tuple, Dict, Any, List
 from .dynamics import QuadcopterDynamics
 from .lqr_controller import PerAxisLQR
 
+class RewardNormalizer:
+    def __init__(self, beta=0.99, eps=1e-8):
+        self.mu = 0.0
+        self.var = 1.0
+        self.beta = beta
+        self.eps = eps
+        
+    def normalize(self, r):
+        self.mu = self.beta * self.mu + (1 - self.beta) * r
+        self.var = self.beta * self.var + (1 - self.beta) * (r - self.mu)**2
+        return (r - self.mu) / (np.sqrt(self.var) + self.eps)
+
 class QuadcopterEnv:
     """
     Multi-agent quadcopter environment with 3D obstacles.
@@ -53,6 +65,9 @@ class QuadcopterEnv:
         self.max_steps = config.get('max_steps', 2000)
         self.prev_dist_to_goal = np.zeros(self.num_agents, dtype=np.float32)
         self.agent_dones = np.zeros(self.num_agents, dtype=bool)
+        self.prev_actions = np.zeros((self.num_agents, 4), dtype=np.float32)
+        
+        self.reward_normalizer = RewardNormalizer()
         
         # Ablation options
         self.sensor_noise_std = config.get('sensor_noise_std', 0.02) # 2% default
@@ -179,6 +194,7 @@ class QuadcopterEnv:
         self.safety_frontier = np.ones(self.num_agents, dtype=np.float32) * float('inf')
         self.prev_accel = np.zeros((self.num_agents, 3), dtype=np.float32)
         self.prev_vel = np.zeros((self.num_agents, 3), dtype=np.float32)
+        self.prev_actions = np.zeros((self.num_agents, 4), dtype=np.float32)
         
         # Random start positions on the "left" side
         for i in range(self.num_agents):
@@ -331,12 +347,16 @@ class QuadcopterEnv:
             theta_goal = np.arctan2(rel_pos[1], rel_pos[0]) - yaw
             phi_goal = np.arctan2(rel_pos[2], np.sqrt(rel_pos[0]**2 + rel_pos[1]**2))
             
-            vel_norm = self.agents[i].state[6:9] / 15.0
+            vel_norm = self.agents[i].state[6:9] / 3.5
+            
+            # Saturation indicator (Bug 14)
+            is_saturated = float(getattr(self.agents[i], 'is_saturated', False))
             
             obs = np.concatenate([
                 ranges_norm, 
                 [dist_norm, np.sin(theta_goal), np.cos(theta_goal), np.sin(phi_goal), np.cos(phi_goal)],
-                vel_norm
+                vel_norm,
+                [is_saturated]
             ])
             obs_all.append(obs)
             
@@ -404,6 +424,13 @@ class QuadcopterEnv:
             if self.agent_dones[i]: continue
             
             action = actions[i]
+            
+            # Rate-of-change limiting (Bug 13)
+            delta = np.abs(action - self.prev_actions[i])
+            if np.any(delta > 0.5):
+                action = self.prev_actions[i] + np.clip(action - self.prev_actions[i], -0.5, 0.5)
+            self.prev_actions[i] = action.copy()
+            
             vx_cmd, vy_cmd, vz_cmd, yaw_rate_cmd = action[0]*v_max, action[1]*v_side_max, action[2]*v_z_max, action[3]*yaw_rate_max
             
             yaw = self.agents[i].state[5]
@@ -438,14 +465,13 @@ class QuadcopterEnv:
             self.prev_dist_to_goal[i] = dist_to_goal
             
             SAFETY_MARGIN = 2.0
-            if d_min < SAFETY_MARGIN:
-                proximity_factor = 1.0 - (d_min / SAFETY_MARGIN)
-                r_collision = -weights.get('collision', 10.0) * (np.exp(3.0 * proximity_factor) - 1.0 if self.reward_type == 'exponential' else proximity_factor)
+            if d_min < self.collision_dist:
+                r_collision = -weights.get('collision', 50.0)
             else:
                 r_collision = 0.0
             
             r_smooth = -weights.get('smoothness', 0.01) * np.sum(actions[i]**2)
-            r_step = -weights.get('step_penalty', 0.1)
+            r_step = -weights.get('step_penalty', 0.1) * self.M
             
             # Free space reward: Encourage staying in open areas
             min_range = np.min(obs[i, :25]) * self.max_range
@@ -482,6 +508,9 @@ class QuadcopterEnv:
                         if o.get('is_interceptor') and np.linalg.norm(pos - o['pos']) < (o['radius'] + 0.3):
                             penalty *= 2.0; break
                 rewards[i] += penalty
+            
+            # Normalize reward (Bug 10)
+            rewards[i] = self.reward_normalizer.normalize(rewards[i])
             
             self.safety_frontier[i] = min(self.safety_frontier[i], d_min)
 

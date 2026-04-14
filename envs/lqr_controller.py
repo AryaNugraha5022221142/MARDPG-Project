@@ -13,10 +13,10 @@ class PerAxisLQR:
         self.tau = tau
         alpha = np.exp(-dt / tau)  # Eq. 3.16: ZOH decay coeff
 
-        # Discrete-time state matrix (exact ZOH, Eq. 3.14-3.15)
-        self.A = np.array([[1.0, dt],
+        beta = dt - tau * (1 - alpha)
+        self.A = np.array([[1.0, tau * (1 - alpha)],
                            [0.0, alpha]])
-        self.B = np.array([[dt * (1 - alpha) / (1 - alpha + 1e-12)],   # simplified
+        self.B = np.array([[beta],
                            [1 - alpha]])
 
         # Cost matrices (tune these — see methodology Section 3.11.4)
@@ -35,6 +35,6 @@ class PerAxisLQR:
         p, v: current position and velocity
         Returns: u (scalar velocity command to plant)
         """
-        e = np.array([p_ref - p, v_ref - v])  # tracking error
+        e = np.array([p - p_ref, v - v_ref])  # x - x_ref (thesis sign)
         u = v_ref - self.K @ e               # LQR feedback + feedforward
         return float(u)

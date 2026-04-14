@@ -9,6 +9,7 @@ class QuadcopterDynamics:
         self.dt = dt
         self.tau = tau
         self.noise_std = noise_std
+        self.is_saturated = False
         
         # State: [x, y, z, phi, theta, psi, vx, vy, vz, omega_x, omega_y, omega_z]
         self.state = np.zeros(12, dtype=np.float32)
@@ -25,6 +26,7 @@ class QuadcopterDynamics:
         velocity_ref: [vx*, vy*, vz*, yaw_rate*] from RL policy
         """
         yaw_rate_cmd_rad = np.deg2rad(velocity_ref[3])
+        self.is_saturated = False
         
         for _ in range(M):
             for j, axis in enumerate([0, 1, 2]):
@@ -34,6 +36,8 @@ class QuadcopterDynamics:
                 
                 # Eq. 3.69: LQR feedback + feedforward
                 u_j = lqr.compute_input(p_ref, v_ref, self.state[axis], self.state[6+j])
+                if abs(u_j) > 5.0:
+                    self.is_saturated = True
                 u_j = np.clip(u_j, -5.0, 5.0)  # Actuator saturation Eq. 3.74
                 
                 # Apply u_j to plant dynamics (ZOH update, Eq. 3.16)
@@ -46,10 +50,16 @@ class QuadcopterDynamics:
             psi_new = psi + yaw_rate_cmd_rad * self.dt
             self.state[5] = (psi_new + np.pi) % (2 * np.pi) - np.pi
             
-        # Roll and pitch estimation (simplified attitude tracking)
-        vx_cmd, vy_cmd, vz_cmd = velocity_ref[0:3]
-        self.state[3] = np.arctan2(vy_cmd, np.sqrt(vx_cmd**2 + 0.01)) * 0.5
-        self.state[4] = np.arctan2(vz_cmd, np.sqrt(vx_cmd**2 + vy_cmd**2 + 0.01)) * 0.5
+        # Roll and pitch estimation (physically motivated from acceleration)
+        # a = (u - v) / tau. phi = arctan(a_y / g), theta = arctan(-a_x / g)
+        a_x = (velocity_ref[0] - self.state[6]) / self.tau
+        a_y = (velocity_ref[1] - self.state[7]) / self.tau
+        
+        phi_new = np.clip(np.arctan2(a_y, 9.81), -np.deg2rad(20), np.deg2rad(20))
+        theta_new = np.clip(np.arctan2(-a_x, 9.81), -np.deg2rad(20), np.deg2rad(20))
+        
+        self.state[3] = phi_new
+        self.state[4] = theta_new
         
         return self.state.copy()
 
@@ -65,14 +75,15 @@ class QuadcopterDynamics:
             
         yaw_rate_cmd_rad = np.deg2rad(velocity_cmd[3])
         
-        # Current velocities
-        v = self.state[6:9]
-        
-        # Velocity update
-        v_new = v + (v_cmd - v) / self.tau * self.dt
-        
-        # Position update (Euler integration)
-        x_new = self.state[0:3] + v_new * self.dt
+        # ZOH update
+        alpha = np.exp(-self.dt / self.tau)
+        self.is_saturated = False
+        for j in range(3):
+            if abs(v_cmd[j]) > 5.0:
+                self.is_saturated = True
+            u_j = np.clip(v_cmd[j], -5.0, 5.0)
+            self.state[6+j] = alpha * self.state[6+j] + (1 - alpha) * u_j
+            self.state[j] += self.state[6+j] * self.dt
         
         # Yaw update
         psi = self.state[5]
@@ -81,16 +92,15 @@ class QuadcopterDynamics:
         psi_new = (psi_new + np.pi) % (2 * np.pi) - np.pi
         
         # Roll and pitch estimation
-        vx_cmd, vy_cmd, vz_cmd = v_cmd
-        phi_new = np.arctan2(vy_cmd, np.sqrt(vx_cmd**2 + 0.01)) * 0.5
-        theta_new = np.arctan2(vz_cmd, np.sqrt(vx_cmd**2 + vy_cmd**2 + 0.01)) * 0.5
+        a_x = (v_cmd[0] - self.state[6]) / self.tau
+        a_y = (v_cmd[1] - self.state[7]) / self.tau
+        phi_new = np.clip(np.arctan2(a_y, 9.81), -np.deg2rad(20), np.deg2rad(20))
+        theta_new = np.clip(np.arctan2(-a_x, 9.81), -np.deg2rad(20), np.deg2rad(20))
         
         # Update state
-        self.state[0:3] = x_new
         self.state[3] = phi_new
         self.state[4] = theta_new
         self.state[5] = psi_new
-        self.state[6:9] = v_new
         self.state[9:12] = 0.0  # Simplified angular velocities
         
         return self.state.copy()

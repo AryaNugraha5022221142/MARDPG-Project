@@ -50,7 +50,7 @@ environment:
   dt: 0.01
   dynamic_ratio: 0.3
   max_steps: 2000          # was 1000 — 20 s at dt=0.01
-  obs_dim: 33              # was 32 — added cos_phi
+  obs_dim: 34              # was 33 — added is_saturated
   reward_type: "exponential"
 
 logging:
