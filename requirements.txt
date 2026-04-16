@@ -8,3 +8,4 @@ pandas
 PyYAML
 stable-baselines3
 pytest
+tqdm

@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from collections import deque
 import pandas as pd
 import json
+from tqdm import tqdm
 
 # Add the project root to the Python path so it can find 'envs' and 'agents'
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -115,7 +116,8 @@ def main():
     
     print(f"Starting training for {num_episodes} episodes...")
 
-    for episode in range(1, num_episodes + 1):
+    pbar = tqdm(range(1, num_episodes + 1), desc="Training")
+    for episode in pbar:
         obs, _ = env.reset()
         if args.agent == 'mardpg':
             actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
@@ -188,7 +190,7 @@ def main():
         if episode % config['logging']['log_interval'] == 0:
             avg_reward = np.mean(recent_rewards)
             success_rate = np.mean(recent_success)
-            print(f"Episode {episode}/{num_episodes} | Level: {curriculum_level} | Avg Reward: {avg_reward:.2f} | Success Rate: {success_rate:.2f} | Epsilon: {epsilon:.3f}")
+            pbar.set_postfix({'Level': curriculum_level, 'Reward': f'{avg_reward:.2f}', 'Success': f'{success_rate:.2f}', 'Eps': f'{epsilon:.3f}'})
             
             if use_wandb:
                 wandb.log({
@@ -230,15 +232,15 @@ def main():
     plt.style.use('seaborn-v0_8-whitegrid')
     
     # Smooth the reward curve
-    window_size = 100
+    window_size = min(100, max(1, len(reward_history) // 5))  # dynamic window size
     rewards_series = pd.Series(reward_history)
-    smooth_rewards = rewards_series.rolling(window=window_size).mean()
-    std_rewards = rewards_series.rolling(window=window_size).std()
+    smooth_rewards = rewards_series.rolling(window=window_size, min_periods=1).mean()
+    std_rewards = rewards_series.rolling(window=window_size, min_periods=1).std().fillna(0)
     
-    plt.plot(smooth_rewards, label=f'{args.agent.upper()} (Mean Reward)', color='#c0392b', linewidth=2)
-    plt.fill_between(range(len(smooth_rewards)), 
-                     smooth_rewards - std_rewards, 
-                     smooth_rewards + std_rewards, 
+    plt.plot(smooth_rewards.index, smooth_rewards.values, label=f'{args.agent.upper()} (Mean Reward)', color='#c0392b', linewidth=2)
+    plt.fill_between(smooth_rewards.index, 
+                     (smooth_rewards - std_rewards).values, 
+                     (smooth_rewards + std_rewards).values, 
                      color='#c0392b', alpha=0.2, label='Std Dev')
     
     plt.title(f'Reward during all the training episodes ({args.agent.upper()})', fontsize=14, fontweight='bold')
@@ -251,8 +253,8 @@ def main():
     # Success Rate Plot
     plt.figure(figsize=(10, 6))
     success_series = pd.Series(success_history)
-    smooth_success = success_series.rolling(window=window_size).mean()
-    plt.plot(smooth_success, color='#2ecc71', linewidth=2)
+    smooth_success = success_series.rolling(window=window_size, min_periods=1).mean()
+    plt.plot(smooth_success.index, smooth_success.values, color='#2ecc71', linewidth=2)
     plt.title(f'Average Success Rate during Training ({args.agent.upper()})', fontsize=14, fontweight='bold')
     plt.xlabel('Episodes', fontsize=12)
     plt.ylabel('Success Rate', fontsize=12)
