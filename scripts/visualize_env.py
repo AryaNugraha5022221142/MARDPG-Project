@@ -35,8 +35,8 @@ def main():
     
     try:
         for step in range(1000):
-            # Take random actions to see movement
-            actions = [np.random.randint(6) for _ in range(env.num_agents)]
+            # Take random continuous actions to see movement (vx, vy, vz, yaw_rate)
+            actions = np.random.uniform(-1.0, 1.0, size=(env.num_agents, 4))
             obs, rewards, terminated, truncated, info = env.step(actions)
             
             env.render()
