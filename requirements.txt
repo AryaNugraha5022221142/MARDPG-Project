@@ -2,3 +2,9 @@ numpy
 matplotlib
 gymnasium
 typing-extensions
+torch
+scipy
+pandas
+PyYAML
+stable-baselines3
+pytest
