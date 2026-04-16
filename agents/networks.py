@@ -57,9 +57,10 @@ class CriticLSTM(nn.Module):
     Centralized Critic network (MARDPG style).
     Takes actor hidden states and joint actions.
     """
-    def __init__(self, obs_dim: int = 33, action_dim: int = 4, num_agents: int = 3, hidden_dim: int = 128, num_layers: int = 1, independent: bool = False):
+    def __init__(self, obs_dim: int = 33, action_dim: int = 4, num_agents: int = 3, hidden_dim: int = 128, num_layers: int = 1, independent: bool = False, critic_hidden_dim: int = 128):
         super(CriticLSTM, self).__init__()
         self.hidden_dim = hidden_dim
+        self.critic_hidden_dim = critic_hidden_dim
         self.num_layers = num_layers
         self.independent = independent
         
@@ -68,13 +69,12 @@ class CriticLSTM(nn.Module):
         else:
             input_dim = (hidden_dim * num_agents) + (action_dim * num_agents)
         
-        self.fc1 = nn.Linear(input_dim, 256)
-        self.fc2 = nn.Linear(256, 128)
-        self.fc3 = nn.Linear(128, 1)
+        self.lstm = nn.LSTM(input_dim, critic_hidden_dim, num_layers, batch_first=True)
+        self.fc_out = nn.Linear(critic_hidden_dim, 1)
 
     def init_hidden(self, batch_size: int = 1, device: str = 'cpu') -> Tuple[torch.Tensor, torch.Tensor]:
-        h0 = torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(device)
-        c0 = torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(device)
+        h0 = torch.zeros(self.num_layers, batch_size, self.critic_hidden_dim).to(device)
+        c0 = torch.zeros(self.num_layers, batch_size, self.critic_hidden_dim).to(device)
         return (h0, c0)
 
     def forward(self, actor_hidden_states: torch.Tensor, actions: torch.Tensor, hidden: Tuple[torch.Tensor, torch.Tensor] = None, agent_idx: int = None) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
@@ -94,13 +94,11 @@ class CriticLSTM(nn.Module):
             a_flat = actions.view(batch_size, seq_len, -1)
             x = torch.cat([h_flat, a_flat], dim=2)
         
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        q_values = self.fc3(x)
-        
-        # Return dummy hidden state to maintain compatibility with existing code
-        dummy_hidden = (torch.zeros(1), torch.zeros(1))
-        return q_values, dummy_hidden
+        if hidden is None:
+            hidden = self.init_hidden(batch_size, x.device)
+            
+        y, new_h = self.lstm(x, hidden)
+        return self.fc_out(y), new_h
 
 class Actor(nn.Module):
     """

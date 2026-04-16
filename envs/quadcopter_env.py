@@ -50,6 +50,8 @@ class QuadcopterEnv:
         self.dt = config['dt']
         self.dynamic_ratio = config.get('dynamic_ratio', 0.3)
         self.M = config.get('inner_steps', 10)
+        self.cooperative = config.get('cooperative', False)
+        self.rate_limit_per_step = config.get('rate_limit_per_step', 0.5)
         
         self.arena_diagonal = np.linalg.norm(self.arena_size)
         
@@ -427,8 +429,8 @@ class QuadcopterEnv:
             
             # Rate-of-change limiting (Bug 13)
             delta = np.abs(action - self.prev_actions[i])
-            if np.any(delta > 0.5):
-                action = self.prev_actions[i] + np.clip(action - self.prev_actions[i], -0.5, 0.5)
+            if np.any(delta > self.rate_limit_per_step):
+                action = self.prev_actions[i] + np.clip(action - self.prev_actions[i], -self.rate_limit_per_step, self.rate_limit_per_step)
             
             r_smooth_arr[i] = -self.reward_config['weights'].get('smoothness', 0.01) * np.sum((action - self.prev_actions[i])**2)
             self.prev_actions[i] = action.copy()
@@ -521,6 +523,10 @@ class QuadcopterEnv:
             rewards[i] = dense_r + terminal_bonus
             
             self.safety_frontier[i] = min(self.safety_frontier[i], d_min)
+
+        if self.cooperative:
+            team_r = np.sum(rewards) / self.num_agents
+            rewards[:] = team_r
 
         # Global termination
         terminated = np.all(self.agent_dones)

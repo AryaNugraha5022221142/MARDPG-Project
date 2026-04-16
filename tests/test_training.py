@@ -11,7 +11,7 @@ def test_buffer():
     buffer = ReplayBuffer(capacity=100)
     
     obs = np.random.randn(3, 34)
-    actions = np.array([0, 1, 2])
+    actions = np.random.randn(3, 4)
     rewards = np.array([0.1, 0.2, 0.3])
     next_obs = np.random.randn(3, 34)
     dones = np.array([False, False, False])
@@ -27,7 +27,7 @@ def test_buffer():
     b_obs, b_actions, b_rewards, b_next_obs, b_dones = buffer.sample(batch_size=5)
     
     assert b_obs.shape == (5, 3, 34)
-    assert b_actions.shape == (5, 3)
+    assert b_actions.shape == (5, 3, 4)
     assert b_rewards.shape == (5, 3)
     assert b_next_obs.shape == (5, 3, 34)
     assert b_dones.shape == (5, 3)

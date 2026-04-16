@@ -27,6 +27,9 @@ class PerAxisLQR:
         P = solve_discrete_are(self.A, self.B, self.Q_lqr, self.R_lqr)
         self.K = np.linalg.inv(self.R_lqr + self.B.T @ P @ self.B) @ self.B.T @ P @ self.A
         # K shape: (1, 2) — gain on [pos_error, vel_error]
+        
+        Acl = self.A - self.B @ self.K
+        assert np.max(np.abs(np.linalg.eigvals(Acl))) < 1.0, 'LQR unstable'
 
     def compute_input(self, p_ref, v_ref, p, v):
         """
