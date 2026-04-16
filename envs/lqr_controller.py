@@ -36,5 +36,5 @@ class PerAxisLQR:
         Returns: u (scalar velocity command to plant)
         """
         e = np.array([p - p_ref, v - v_ref])  # x - x_ref (thesis sign)
-        u = v_ref - self.K @ e               # LQR feedback + feedforward
+        u = v_ref - (self.K @ e).item()       # scalar-safe
         return float(u)

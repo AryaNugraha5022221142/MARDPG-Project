@@ -51,7 +51,7 @@ class MARDPG:
             }
         self.config = config
         
-        self.gamma = 0.99 ** config.get('inner_steps', 10)
+        self.gamma = config['learning'].get('gamma', 0.99)
         self.tau = config['targets'].get('update_rate', 0.01)
         self.batch_size = config['memory'].get('batch_size', 32)
         self.seq_len = config['memory'].get('seq_len', 16)

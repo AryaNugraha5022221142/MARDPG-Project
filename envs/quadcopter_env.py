@@ -416,8 +416,8 @@ class QuadcopterEnv:
                 obs['pos'] = obs['origin'] + obs['vel'] * np.sin(self.step_count * freq + phase)
         
         # Action scaling
-        v_max, v_side_max, v_z_max, yaw_rate_max = 3.5, 3.5, 3.5, 45.0
         jerk_arr = np.zeros(self.num_agents, dtype=np.float32)
+        r_smooth_arr = np.zeros(self.num_agents, dtype=np.float32)
         
         # Apply actions only to active agents
         for i in range(self.num_agents):
@@ -429,9 +429,14 @@ class QuadcopterEnv:
             delta = np.abs(action - self.prev_actions[i])
             if np.any(delta > 0.5):
                 action = self.prev_actions[i] + np.clip(action - self.prev_actions[i], -0.5, 0.5)
+            
+            r_smooth_arr[i] = -self.reward_config['weights'].get('smoothness', 0.01) * np.sum((action - self.prev_actions[i])**2)
             self.prev_actions[i] = action.copy()
             
-            vx_cmd, vy_cmd, vz_cmd, yaw_rate_cmd = action[0]*v_max, action[1]*v_side_max, action[2]*v_z_max, action[3]*yaw_rate_max
+            # Network already outputs in [-3.5, 3.5]; do NOT rescale again.
+            vx_cmd, vy_cmd, vz_cmd = action[0], action[1], action[2]
+            # Yaw: network outputs [-3.5, 3.5]; scale so max = pi/4 rad/s ~ 45 deg/s:
+            yaw_rate_cmd = action[3] * (45.0 / 3.5)     # stays under thesis bound
             
             yaw = self.agents[i].state[5]
             vx_world = vx_cmd * np.cos(yaw) - vy_cmd * np.sin(yaw)
@@ -464,32 +469,36 @@ class QuadcopterEnv:
             r_transfer = weights.get('transfer', 2.0) * (self.prev_dist_to_goal[i] - dist_to_goal)
             self.prev_dist_to_goal[i] = dist_to_goal
             
-            SAFETY_MARGIN = 2.0
-            if d_min < self.collision_dist:
-                r_collision = -weights.get('collision', 50.0)
+            d_margin = 2.0
+            if d_min < d_margin:
+                r_collision = -weights.get('collision', 50.0) * np.exp(-d_min / d_margin)
             else:
                 r_collision = 0.0
             
-            r_smooth = -weights.get('smoothness', 0.01) * np.sum(actions[i]**2)
+            r_smooth = r_smooth_arr[i]
             r_step = -weights.get('step_penalty', 0.1) * self.M
             
             # Free space reward: Encourage staying in open areas
             min_range = np.min(obs[i, :25]) * self.max_range
             r_free = weights.get('free_space', 0.05) if min_range > 5.0 else 0.0
             
-            rewards[i] = r_transfer + r_collision + r_smooth + r_step + r_free
+            dense_r = r_transfer + r_collision + r_smooth + r_step + r_free
             
             # Scenario logic
             if self.scenario == 'urban_canyon':
                 alt = pos[2]
                 if (5.0 <= alt <= 15.0) or (30.0 <= alt <= 45.0):
-                    rewards[i] += 0.5
-            elif self.scenario == 'search_and_rescue':
+                    dense_r += 0.5
+            
+            dense_r = self.reward_normalizer.normalize(dense_r)
+            terminal_bonus = 0.0
+            
+            if self.scenario == 'search_and_rescue':
                 target_radius = self.reward_config.get('target_radius', 0.5)
                 for j, t_pos in enumerate(self.sar_targets):
                     if j not in self.targets_claimed and np.linalg.norm(pos - t_pos) < target_radius:
                         self.targets_claimed.add(j)
-                        rewards[i] += 50.0
+                        terminal_bonus += 50.0
                         self._update_sar_goals()
                         break
             
@@ -497,7 +506,7 @@ class QuadcopterEnv:
             if dist_to_goal < self.goal_dist:
                 if self.scenario != 'search_and_rescue':
                     self.agent_dones[i] = True
-                    rewards[i] += self.reward_config.get('goal_bonus', 200.0)
+                    terminal_bonus += self.reward_config.get('goal_bonus', 200.0)
             
             if d_min < self.collision_dist:
                 self.agent_dones[i] = True
@@ -507,10 +516,9 @@ class QuadcopterEnv:
                     for o in self.obstacles:
                         if o.get('is_interceptor') and np.linalg.norm(pos - o['pos']) < (o['radius'] + 0.3):
                             penalty *= 2.0; break
-                rewards[i] += penalty
+                terminal_bonus += penalty
             
-            # Normalize reward (Bug 10)
-            rewards[i] = self.reward_normalizer.normalize(rewards[i])
+            rewards[i] = dense_r + terminal_bonus
             
             self.safety_frontier[i] = min(self.safety_frontier[i], d_min)
 

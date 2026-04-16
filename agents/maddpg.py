@@ -38,7 +38,7 @@ class MADDPG:
             }
         self.config = config
         
-        self.gamma = 0.99 ** config.get('inner_steps', 10)
+        self.gamma = config['learning'].get('gamma', 0.99)
         self.tau = config['targets'].get('update_rate', 0.01)
         self.batch_size = config['memory'].get('batch_size', 128)
         self.max_grad_norm = config['learning'].get('max_grad_norm', 1.0)
