@@ -14,8 +14,7 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description='Visualize the Quadcopter Environment')
     parser.add_argument('--scenario', type=str, default='city', 
-                        choices=['empty', 'static_dense', 'dynamic_chaos', 'narrow_passage', 'city', 'forest', 'warzone'],
-                        help='Scenario to visualize')
+                        help='Scenario to visualize (e.g., empty, static_dense, basic_obstacles, city)')
     parser.add_argument('--agents', type=int, default=3, help='Number of agents')
     args = parser.parse_args()
 

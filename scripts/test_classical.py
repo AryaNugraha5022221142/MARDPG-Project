@@ -15,7 +15,7 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description='Test Classical Potential Field Algorithm')
     parser.add_argument('--scenario', type=str, default='static_dense', 
-                        choices=['empty', 'static_dense', 'dynamic_chaos', 'narrow_passage'])
+                        help='Scenario to test (e.g., empty, static_dense, basic_obstacles)')
     parser.add_argument('--render', action='store_true', help='Enable visualization')
     args = parser.parse_args()
 
