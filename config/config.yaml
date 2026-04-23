@@ -25,7 +25,7 @@ learning:
 memory:
   buffer_size: 2000       # episodes
   batch_size: 32
-  seq_len: 64             # was 16 — gives LSTM meaningful horizon
+  seq_len: 16             # reduced from 64 to minimize frozen padding in early short episodes
 
 targets:
   update_rate: 0.01
@@ -41,8 +41,8 @@ rewards:
   collision_penalty: -100.0
 
 environment:
-  arena_size: [100, 100, 40]
-  num_obstacles: 25
+  arena_size: [30, 30, 15] # Start small
+  num_obstacles: 0
   max_velocity: 5.0
   rangefinder_max_range: 30.0
   collision_distance: 0.8

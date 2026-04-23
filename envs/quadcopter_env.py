@@ -142,16 +142,30 @@ class QuadcopterEnv:
     def set_curriculum_level(self, level: int):
         """
         Updates environment difficulty based on curriculum level.
-        Level 0: 5 obstacles, 0% dynamic
-        Level 1: 15 obstacles, 10% dynamic
-        Level 2: 25 obstacles, 20% dynamic
-        Level 3: 35 obstacles, 30% dynamic
-        Level 4: 45 obstacles, 40% dynamic
+        Level 0: 30x30x15, 0 obstacles, 0% dynamic
+        Level 1: 50x50x20, 5 obstacles, 0% dynamic
+        Level 2: 75x75x30, 15 obstacles, 10% dynamic
+        Level 3: 100x100x40, 25 obstacles, 20% dynamic
         """
-        self.num_obstacles = 5 + level * 10
-        self.dynamic_ratio = min(0.1 * level, 0.5)
+        if level == 0:
+            self.arena_size = [30, 30, 15]
+            self.num_obstacles = 0
+            self.dynamic_ratio = 0.0
+        elif level == 1:
+            self.arena_size = [50, 50, 20]
+            self.num_obstacles = 5
+            self.dynamic_ratio = 0.0
+        elif level == 2:
+            self.arena_size = [75, 75, 30]
+            self.num_obstacles = 15
+            self.dynamic_ratio = 0.1
+        else:
+            self.arena_size = [100, 100, 40]
+            self.num_obstacles = 15 + (level - 2) * 10
+            self.dynamic_ratio = min(0.1 + (level - 2) * 0.1, 0.5)
+            
         self._generate_obstacles()
-        print(f"Curriculum Level Updated: {level} (Obstacles: {self.num_obstacles}, Dynamic: {self.dynamic_ratio:.1f})")
+        print(f"Curriculum Level Updated: {level} (Arena: {self.arena_size}, Obstacles: {self.num_obstacles}, Dynamic: {self.dynamic_ratio:.1f})")
 
     def reset(self, seed=None) -> Tuple[np.ndarray, Dict[str, Any]]:
         """Resets the environment and returns initial observations."""

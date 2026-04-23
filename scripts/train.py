@@ -107,12 +107,13 @@ def main():
     
     # Curriculum Learning
     curriculum_level = 0
-    success_threshold = 0.7  # 70% success to move to next level
+    success_threshold = 0.6  # 60% success to move to next level
     env.set_curriculum_level(curriculum_level)
     
     # Academic Data Tracking
     reward_history = []
     success_history = []
+    global_step_count = 0
     
     print(f"Starting training for {num_episodes} episodes...")
 
@@ -151,6 +152,7 @@ def main():
             
             # Episode is over if all agents are done or max steps reached
             done = terminated or truncated
+            global_step_count += 1
             
             if args.agent == 'mardpg':
                 agent.memory.push(obs, np.array(actions), rewards, next_obs, dones, actor_hidden_np, critic_hidden_np, done)
@@ -158,7 +160,7 @@ def main():
                 agent.memory.push(obs, np.array(actions), rewards, next_obs, dones)
             
             # Only update if we have enough episodes in the buffer
-            if len(agent.memory) >= config['memory'].get('batch_size', 32) and env.step_count % config.get('update_interval', 10) == 0:
+            if len(agent.memory) >= config['memory'].get('batch_size', 32) and global_step_count % config.get('update_interval', 10) == 0:
                 loss_dict = agent.update()
             else:
                 loss_dict = {}

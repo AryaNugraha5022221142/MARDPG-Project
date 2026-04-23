@@ -29,7 +29,7 @@ class MARDPG:
     """
     Multi-Agent Recurrent Deterministic Policy Gradient (MARDPG)
     """
-    def __init__(self, obs_dim: int = 33, action_dim: int = 4, num_agents: int = 3, 
+    def __init__(self, obs_dim: int = 34, action_dim: int = 4, num_agents: int = 3, 
                  config: Dict[str, Any] = None, device: str = 'cpu', independent_critics: bool = False):
         self.obs_dim = obs_dim
         self.action_dim = action_dim
