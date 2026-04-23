@@ -9,26 +9,21 @@ import copy
 from .networks import ActorLSTM, CriticLSTM
 from .replay_buffer import SequenceReplayBuffer
 
-class OrnsteinUhlenbeckNoise:
+class AdaptiveGaussianNoise:
     """
-    OU Noise for continuous action exploration.
+    Gaussian Noise for continuous action exploration with annealing.
     """
-    def __init__(self, action_dim, mu=0.0, theta=0.15, sigma=0.2, dt=0.1):
+    def __init__(self, action_dim, sigma_start=0.3, sigma_end=0.02, total_steps=200000):
+        self.sigma = sigma_start
+        self.sigma_end = sigma_end
+        self.decay = (sigma_start - sigma_end) / total_steps
         self.action_dim = action_dim
-        self.mu = mu
-        self.theta = theta
-        self.sigma = sigma
-        self.dt = dt
-        self.state = np.ones(self.action_dim) * self.mu
-
-    def reset(self):
-        self.state = np.ones(self.action_dim) * self.mu
 
     def sample(self):
-        x = self.state
-        dx = self.theta * (self.mu - x) * self.dt + self.sigma * np.sqrt(self.dt) * np.random.randn(len(x))
-        self.state = x + dx
-        return self.state
+        return np.random.normal(0, self.sigma, self.action_dim)
+        
+    def step(self):
+        self.sigma = max(self.sigma_end, self.sigma - self.decay)
 
 class MARDPG:
     """
@@ -68,8 +63,8 @@ class MARDPG:
         self.critics = [CriticLSTM(obs_dim, action_dim, num_agents, hidden_dim, lstm_layers, independent=independent_critics).to(self.device) for _ in range(num_agents)]
         self.critics_target = [copy.deepcopy(c).to(self.device) for c in self.critics]
         
-        # Noise (OU for continuous)
-        self.noise = [OrnsteinUhlenbeckNoise(action_dim) for _ in range(num_agents)]
+        # Noise (Gaussian for continuous)
+        self.noise = [AdaptiveGaussianNoise(action_dim) for _ in range(num_agents)]
         
         # Optimizers
         actor_lr = config['learning'].get('actor_lr', 1e-4)
@@ -84,8 +79,7 @@ class MARDPG:
 
     def select_actions(self, obs: np.ndarray, 
                        actor_hidden: List[Tuple[torch.Tensor, torch.Tensor]], 
-                       critic_hidden: List[Tuple[torch.Tensor, torch.Tensor]],
-                       noise_scale: float = 0.1) -> Tuple[np.ndarray, List[Tuple[torch.Tensor, torch.Tensor]], List[Tuple[torch.Tensor, torch.Tensor]]]:
+                       critic_hidden: List[Tuple[torch.Tensor, torch.Tensor]]) -> Tuple[np.ndarray, List[Tuple[torch.Tensor, torch.Tensor]], List[Tuple[torch.Tensor, torch.Tensor]]]:
         """
         Selects continuous actions for all agents and updates both actor and critic hidden states.
         obs: (num_agents, obs_dim)
@@ -111,9 +105,9 @@ class MARDPG:
                 
                 action = action.cpu().numpy().flatten()
                 
-                # Add OU Noise
-                if noise_scale > 0:
-                    action += self.noise[i].sample() * noise_scale
+                # Add Gaussian Noise
+                action += self.noise[i].sample()
+                self.noise[i].step() # anneal after each call
                 
                 action = np.clip(action, -3.5, 3.5)
                 actions.append(action)

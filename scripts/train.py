@@ -140,7 +140,7 @@ def main():
                 for h, c in critic_hidden:
                     critic_hidden_np.append((h.cpu().numpy(), c.cpu().numpy()))
                 
-                actions, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden, noise_scale=epsilon)
+                actions, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden)
             else:
                 actions = agent.select_actions(obs, epsilon)
                 
