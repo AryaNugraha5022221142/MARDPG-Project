@@ -148,22 +148,23 @@ class QuadcopterEnv:
         Level 3: 100x100x40, 25 obstacles, 20% dynamic
         """
         if level == 0:
-            self.arena_size = [30, 30, 15]
+            self.arena_size = np.array([30, 30, 15], dtype=np.float32)
             self.num_obstacles = 0
             self.dynamic_ratio = 0.0
         elif level == 1:
-            self.arena_size = [50, 50, 20]
+            self.arena_size = np.array([50, 50, 20], dtype=np.float32)
             self.num_obstacles = 5
             self.dynamic_ratio = 0.0
         elif level == 2:
-            self.arena_size = [75, 75, 30]
+            self.arena_size = np.array([75, 75, 30], dtype=np.float32)
             self.num_obstacles = 15
             self.dynamic_ratio = 0.1
         else:
-            self.arena_size = [100, 100, 40]
+            self.arena_size = np.array([100, 100, 40], dtype=np.float32)
             self.num_obstacles = 15 + (level - 2) * 10
             self.dynamic_ratio = min(0.1 + (level - 2) * 0.1, 0.5)
             
+        self.arena_diagonal = float(np.linalg.norm(self.arena_size))
         self._generate_obstacles()
         print(f"Curriculum Level Updated: {level} (Arena: {self.arena_size}, Obstacles: {self.num_obstacles}, Dynamic: {self.dynamic_ratio:.1f})")
 
