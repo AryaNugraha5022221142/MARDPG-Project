@@ -13,7 +13,7 @@ class AdaptiveGaussianNoise:
     """
     Gaussian Noise for continuous action exploration with annealing.
     """
-    def __init__(self, action_dim, sigma_start=0.3, sigma_end=0.02, total_steps=200000):
+    def __init__(self, action_dim, sigma_start=1.2, sigma_end=0.15, total_steps=3000000):
         self.sigma = sigma_start
         self.sigma_end = sigma_end
         self.decay = (sigma_start - sigma_end) / total_steps

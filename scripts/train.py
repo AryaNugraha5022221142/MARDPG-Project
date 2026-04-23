@@ -191,8 +191,12 @@ def main():
         
         if episode % config['logging']['log_interval'] == 0:
             avg_reward = np.mean(recent_rewards)
-            success_rate = np.mean(recent_success)
-            pbar.set_postfix({'Level': curriculum_level, 'Reward': f'{avg_reward:.2f}', 'Success': f'{success_rate:.2f}', 'Eps': f'{epsilon:.3f}'})
+            success_rate = np.mean(recent_success) if len(recent_success) > 0 else 0.0
+            
+            # Use actual sigma for continuous agents (MARDPG/MADDPG), else fallback to epsilon
+            current_sigma = agent.noise[0].sigma if hasattr(agent, 'noise') else epsilon
+            
+            pbar.set_postfix({'Level': curriculum_level, 'Reward': f'{avg_reward:.2f}', 'Success': f'{success_rate:.2f}', 'Sigma': f'{current_sigma:.3f}'})
             
             if use_wandb:
                 wandb.log({
@@ -200,7 +204,7 @@ def main():
                     'curriculum_level': curriculum_level,
                     'avg_reward': avg_reward,
                     'success_rate': success_rate,
-                    'epsilon': epsilon
+                    'sigma': current_sigma
                 })
                 
         if episode % config['logging']['save_interval'] == 0:
