@@ -23,9 +23,11 @@ learning:
   max_grad_norm: 1.0
 
 memory:
-  buffer_size: 2000       # episodes
+  buffer_size: 500       # was 2000; with 2000-step eps this is still 1M transitions
   batch_size: 32
-  seq_len: 16             # reduced from 64 to minimize frozen padding in early short episodes
+  seq_len: 64            # was 16; covers 6.4s of sim at dt=0.01x10
+
+update_interval: 50      # was missing (defaulted to 10, too aggressive)
 
 targets:
   update_rate: 0.01
