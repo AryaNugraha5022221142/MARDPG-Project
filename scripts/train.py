@@ -45,6 +45,9 @@ def main():
 
     # Environment
     env_config = config['environment'].copy()
+    if 'rewards' in config:
+        env_config['rewards'] = config['rewards']
+    
     if args.scenario:
         from envs.scenarios import get_scenario_config
         scenario_config = get_scenario_config(args.scenario)

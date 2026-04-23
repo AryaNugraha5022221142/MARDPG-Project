@@ -513,7 +513,11 @@ class QuadcopterEnv:
             if d_min < self.collision_dist:
                 self.agent_dones[i] = True
                 info['collision'] = True
-                penalty = -50.0
+                penalty = self.reward_config.get('collision_penalty', -50.0)
+                # Eliminate RL suicide bug: penalize for all forfeited steps
+                remaining_steps = self.max_steps - self.step_count
+                penalty += (r_step + r_free) * remaining_steps
+                
                 if self.scenario == 'dynamic_intercept':
                     for o in self.obstacles:
                         if o.get('is_interceptor') and np.linalg.norm(pos - o['pos']) < (o['radius'] + 0.3):

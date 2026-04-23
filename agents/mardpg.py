@@ -152,9 +152,6 @@ class MARDPG:
         next_obs = torch.FloatTensor(nobs_seq).to(self.device)
         dones = torch.FloatTensor(done_seq).to(self.device)
         
-        # Bounded reward clipping to prevent outlier domination without destroying signal variance
-        rewards = torch.clamp(rewards, -10.0, 10.0)
-        
         h_actor, c_actor = actor_init
         h_actor = [torch.FloatTensor(h).to(self.device) for h in h_actor]
         c_actor = [torch.FloatTensor(c).to(self.device) for c in c_actor]
