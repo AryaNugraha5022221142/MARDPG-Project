@@ -35,10 +35,10 @@ rewards:
     transfer: 1.0
     collision: 25.0
     smoothness: 0.01
-    step_penalty: 0.1
+    step_penalty: 0.005
     free_space: 0.05
   goal_bonus: 200.0
-  collision_penalty: -50.0
+  collision_penalty: -100.0
 
 environment:
   arena_size: [100, 100, 40]

@@ -459,12 +459,12 @@ class QuadcopterEnv:
             
             d_margin = 2.0
             if d_min < d_margin:
-                r_collision = -weights.get('collision', 50.0) * np.exp(-d_min / d_margin)
+                r_collision = -weights.get('collision', 50.0) * (1.0 - d_min / d_margin)
             else:
                 r_collision = 0.0
             
             r_smooth = r_smooth_arr[i]
-            r_step = -weights.get('step_penalty', 0.1) * self.M
+            r_step = -weights.get('step_penalty', 0.005) * self.M
             
             # Free space reward: Encourage staying in open areas
             min_range = np.min(obs[i, :25]) * self.max_range
