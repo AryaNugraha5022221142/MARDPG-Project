@@ -4,18 +4,6 @@ from typing import Tuple, Dict, Any, List
 from .dynamics import QuadcopterDynamics
 from .lqr_controller import PerAxisLQR
 
-class RewardNormalizer:
-    def __init__(self, beta=0.99, eps=1e-8):
-        self.mu = 0.0
-        self.var = 1.0
-        self.beta = beta
-        self.eps = eps
-        
-    def normalize(self, r):
-        self.mu = self.beta * self.mu + (1 - self.beta) * r
-        self.var = self.beta * self.var + (1 - self.beta) * (r - self.mu)**2
-        return (r - self.mu) / (np.sqrt(self.var) + self.eps)
-
 class QuadcopterEnv:
     """
     Multi-agent quadcopter environment with 3D obstacles.
@@ -68,8 +56,6 @@ class QuadcopterEnv:
         self.prev_dist_to_goal = np.zeros(self.num_agents, dtype=np.float32)
         self.agent_dones = np.zeros(self.num_agents, dtype=bool)
         self.prev_actions = np.zeros((self.num_agents, 4), dtype=np.float32)
-        
-        self.reward_normalizer = RewardNormalizer()
         
         # Ablation options
         self.sensor_noise_std = config.get('sensor_noise_std', 0.02) # 2% default
@@ -492,7 +478,6 @@ class QuadcopterEnv:
                 if (5.0 <= alt <= 15.0) or (30.0 <= alt <= 45.0):
                     dense_r += 0.5
             
-            dense_r = self.reward_normalizer.normalize(dense_r)
             terminal_bonus = 0.0
             
             if self.scenario == 'search_and_rescue':
