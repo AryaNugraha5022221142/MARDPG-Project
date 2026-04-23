@@ -32,13 +32,12 @@ targets:
 
 rewards:
   weights:
-    transfer: 1.0
-    collision: 25.0
+    transfer: 2.0
+    collision: 10.0
     smoothness: 0.01
-    step_penalty: 0.005
-    free_space: 0.05
-  goal_bonus: 200.0
-  collision_penalty: -100.0
+    step_penalty: 0.05
+  goal_bonus: 50.0
+  collision_penalty: -20.0
 
 environment:
   arena_size: [30, 30, 15] # Start small

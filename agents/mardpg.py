@@ -152,10 +152,8 @@ class MARDPG:
         next_obs = torch.FloatTensor(nobs_seq).to(self.device)
         dones = torch.FloatTensor(done_seq).to(self.device)
         
-        # Batch-level z-score normalization
-        rew_mean = rewards.mean(dim=[0, 1], keepdim=True)
-        rew_std = rewards.std(dim=[0, 1], keepdim=True) + 1e-8
-        rewards = (rewards - rew_mean) / rew_std
+        # Bounded reward clipping to prevent outlier domination without destroying signal variance
+        rewards = torch.clamp(rewards, -10.0, 10.0)
         
         h_actor, c_actor = actor_init
         h_actor = [torch.FloatTensor(h).to(self.device) for h in h_actor]
