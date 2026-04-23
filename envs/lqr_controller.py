@@ -19,9 +19,10 @@ class PerAxisLQR:
         self.B = np.array([[beta],
                            [1 - alpha]])
 
-        # Cost matrices (tune these — see methodology Section 3.11.4)
-        self.Q_lqr = np.diag([10.0, 1.0]) if Q is None else Q  # penalise pos error more
-        self.R_lqr = np.array([[0.1]]) if R is None else R
+        # Cost matrices tuned to keep k_v < 0.5 and prevent actuator saturation (>5.0 m/s clipping)
+        # Prevents the actor gradient from dropping to zero at high velocities
+        self.Q_lqr = np.diag([1.0, 0.1]) if Q is None else Q
+        self.R_lqr = np.array([[2.0]]) if R is None else R
 
         # Solve DARE for optimal gain
         P = solve_discrete_are(self.A, self.B, self.Q_lqr, self.R_lqr)
