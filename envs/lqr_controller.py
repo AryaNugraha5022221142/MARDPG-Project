@@ -26,18 +26,17 @@ class PerAxisLQR:
         # Solve DARE for optimal gain
         P = solve_discrete_are(self.A, self.B, self.Q_lqr, self.R_lqr)
         self.K = np.linalg.inv(self.R_lqr + self.B.T @ P @ self.B) @ self.B.T @ P @ self.A
-        # K shape: (1, 2) — gain on [pos_error, vel_error]
+        self.k_v = self.K[0, 1]  # velocity gain only
         
         Acl = self.A - self.B @ self.K
         assert np.max(np.abs(np.linalg.eigvals(Acl))) < 1.0, 'LQR unstable'
 
-    def compute_input(self, p_ref, v_ref, p, v):
+    def compute_velocity_input(self, v_ref, v):
         """
-        Feedback-corrected reference tracking (Eq. 3.68–3.69).
-        p_ref, v_ref: reference position and velocity from RL action
-        p, v: current position and velocity
+        Feedback-corrected reference tracking (pure velocity LQR).
+        v_ref: reference velocity from RL action
+        v: current velocity
         Returns: u (scalar velocity command to plant)
         """
-        e = np.array([p - p_ref, v - v_ref])  # x - x_ref (thesis sign)
-        u = v_ref - (self.K @ e).item()       # scalar-safe
+        u = v_ref + self.k_v * (v_ref - v)
         return float(u)

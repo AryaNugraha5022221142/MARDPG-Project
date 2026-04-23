@@ -30,12 +30,9 @@ class QuadcopterDynamics:
         
         for _ in range(M):
             for j, axis in enumerate([0, 1, 2]):
-                # Eq. 3.68: Reference generation
-                p_ref = self.state[axis] + velocity_ref[j] * self.dt
-                v_ref = velocity_ref[j]
+                # Pure velocity feedback LQR mapping
+                u_j = lqr.compute_velocity_input(velocity_ref[j], self.state[6+j])
                 
-                # Eq. 3.69: LQR feedback + feedforward
-                u_j = lqr.compute_input(p_ref, v_ref, self.state[axis], self.state[6+j])
                 if abs(u_j) > 5.0:
                     self.is_saturated = True
                 u_j = np.clip(u_j, -5.0, 5.0)  # Actuator saturation Eq. 3.74
