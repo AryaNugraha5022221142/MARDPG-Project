@@ -13,7 +13,7 @@ class AdaptiveGaussianNoise:
     """
     Gaussian Noise for continuous action exploration with annealing.
     """
-    def __init__(self, action_dim, sigma_start=1.2, sigma_end=0.15, total_steps=3000000):
+    def __init__(self, action_dim, sigma_start=0.5, sigma_end=0.05, total_steps=500000):
         self.sigma = sigma_start
         self.sigma_end = sigma_end
         self.decay = (sigma_start - sigma_end) / total_steps
@@ -140,10 +140,11 @@ class MARDPG:
         if len(self.memory) < self.batch_size:
             return {}
             
-        # Sample batch of sequences
-        # actor_init: (h_init, c_init) for actors
-        # critic_init: (h_init, c_init) for critics
-        obs_seq, act_seq, rew_seq, nobs_seq, done_seq, actor_init, critic_init = self.memory.sample(self.batch_size, self.seq_len)
+        sampled = self.memory.sample(self.batch_size, self.seq_len)
+        if sampled is None:
+            return {}
+            
+        obs_seq, act_seq, rew_seq, nobs_seq, done_seq, mask_seq = sampled
         
         # Convert to tensors
         obs = torch.FloatTensor(obs_seq).to(self.device)
@@ -151,52 +152,40 @@ class MARDPG:
         rewards = torch.FloatTensor(rew_seq).to(self.device)
         next_obs = torch.FloatTensor(nobs_seq).to(self.device)
         dones = torch.FloatTensor(done_seq).to(self.device)
+        masks = torch.FloatTensor(mask_seq).to(self.device).squeeze(-1) # (batch, seq)
         
-        h_actor, c_actor = actor_init
-        h_actor = [torch.FloatTensor(h).to(self.device) for h in h_actor]
-        c_actor = [torch.FloatTensor(c).to(self.device) for c in c_actor]
+        burn_in = min(8, self.seq_len // 2)
+        masks[:, :burn_in] = 0.0 # Set burn_in steps to 0
         
-        h_critic, c_critic = critic_init
-        h_critic = [torch.FloatTensor(h).to(self.device) for h in h_critic]
-        c_critic = [torch.FloatTensor(c).to(self.device) for c in c_critic]
+        actor_hidden = [self.actor.init_hidden(self.batch_size, self.device) for _ in range(self.num_agents)]
+        critic_hidden = [self.critics[i].init_hidden(self.batch_size, self.device) for i in range(self.num_agents)]
         
         # 1. Update Critics
         critic_losses = []
         
-        # Target actions and hidden states for next_obs
+        # Target actions
         with torch.no_grad():
             next_actions_all = []
-            next_hiddens_all = []
             for i in range(self.num_agents):
                 agent_next_obs = next_obs[:, :, i, :]
-                next_act, _, next_h_seq = self.actor_target(agent_next_obs, (h_actor[i], c_actor[i]), agent_idx=i)
+                next_act, _, _ = self.actor_target(agent_next_obs, actor_hidden[i], agent_idx=i)
                 next_actions_all.append(next_act)
-                next_hiddens_all.append(next_h_seq)
             next_actions_all = torch.stack(next_actions_all, dim=2) # (batch, seq_len, num_agents, action_dim)
-            next_hiddens_all = torch.stack(next_hiddens_all, dim=2) # (batch, seq_len, num_agents, hidden_dim)
-            
-        # Current hidden states for obs
-        with torch.no_grad():
-            curr_hiddens_all = []
-            for i in range(self.num_agents):
-                agent_obs = obs[:, :, i, :]
-                _, _, h_seq = self.actor(agent_obs, (h_actor[i], c_actor[i]), agent_idx=i)
-                curr_hiddens_all.append(h_seq)
-            curr_hiddens_all = torch.stack(curr_hiddens_all, dim=2)
             
         for i in range(self.num_agents):
             # Target Q
             with torch.no_grad():
-                target_q_seq, _ = self.critics_target[i](next_hiddens_all, next_actions_all, (h_critic[i], c_critic[i]), agent_idx=i)
+                target_q_seq, _ = self.critics_target[i](next_obs, next_actions_all, critic_hidden[i], agent_idx=i)
                 target_q_seq = target_q_seq.squeeze(-1) # (batch, seq_len)
                 target_q = rewards[:, :, i] + self.gamma * target_q_seq * (1 - dones[:, :, i])
                 
             # Current Q
-            current_q_seq, _ = self.critics[i](curr_hiddens_all, actions, (h_critic[i], c_critic[i]), agent_idx=i)
+            current_q_seq, _ = self.critics[i](obs, actions, critic_hidden[i], agent_idx=i)
             current_q = current_q_seq.squeeze(-1) # (batch, seq_len)
             
-            # Critic loss (MSE over sequence)
-            critic_loss = F.mse_loss(current_q, target_q)
+            # Critic loss (MSE over sequence with mask)
+            loss = F.mse_loss(current_q, target_q, reduction='none')
+            critic_loss = (loss * masks).sum() / (masks.sum() + 1e-8)
             critic_losses.append(critic_loss.item())
             
             # Optimize critic
@@ -210,28 +199,29 @@ class MARDPG:
         for i in range(self.num_agents):
             # Only recompute agent i's action from current policy
             agent_i_obs = obs[:, :, i, :]
-            agent_i_act, _, agent_i_h_seq = self.actor(agent_i_obs, (h_actor[i], c_actor[i]), agent_idx=i)
+            agent_i_act, _, _ = self.actor(agent_i_obs, actor_hidden[i], agent_idx=i)
             
-            # Build joint action and hidden state: agent i from current policy, others from buffer/detached
+            # Build joint action: agent i from current policy, others from dict
             other_acts = []
-            other_hiddens = []
             for j in range(self.num_agents):
                 if j == i:
                     other_acts.append(agent_i_act)
-                    other_hiddens.append(agent_i_h_seq)
                 else:
                     agent_j_obs = obs[:, :, j, :]
-                    a_j, _, h_j_seq = self.actor(agent_j_obs, (h_actor[j], c_actor[j]), agent_idx=j)
+                    with torch.no_grad():
+                        a_j, _, _ = self.actor(agent_j_obs, actor_hidden[j], agent_idx=j)
                     other_acts.append(a_j.detach())  # detach — no grad for j!=i
-                    other_hiddens.append(h_j_seq.detach())
             
             # Stack: (batch, seq, N, dim)
             joint_actions = torch.stack(other_acts, dim=2)
-            joint_hiddens = torch.stack(other_hiddens, dim=2)
             
             # Use stored critic state for actor gradient calculation
-            q_values, _ = self.critics[i](joint_hiddens, joint_actions, (h_critic[i], c_critic[i]), agent_idx=i)
-            actor_loss += -q_values.mean()
+            q_values, _ = self.critics[i](obs, joint_actions, critic_hidden[i], agent_idx=i)
+            q_values = q_values.squeeze(-1) # (batch, seq)
+            
+            # Actor loss with mask
+            a_loss = (-q_values * masks).sum() / (masks.sum() + 1e-8)
+            actor_loss += a_loss
             
         actor_loss /= self.num_agents
             

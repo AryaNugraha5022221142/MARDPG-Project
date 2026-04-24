@@ -84,9 +84,9 @@ You can test the algorithms in different scenarios by using the `--scenario` fla
 - `forest`: **Under-canopy** - Dense trunks (brown) and branches (green) requiring precise navigation.
 
 ## 🏗️ Environment Structure
-- **State Space (28D)**: 25 rangefinder rays (5x5 grid) + 3D relative goal info.
-- **Action Space (6D Discrete)**: Forward, Yaw Left/Right, Up, Down, Hover.
-- **Dynamics**: Simplified 3D quadcopter physics with inertia and drag.
+- **State Space (34D)**: 25 rangefinder rays (5x5 grid) + 5D relative goal info + 3D normalized velocity + 1D saturation indicator.
+- **Action Space (4D Continuous)**: Pitch, Roll, Throttle, Yaw rate commands processed via internal LQR controller.
+- **Dynamics**: Simplified 3D quadcopter physics with inertia, drag, and LQR stabilization.
 
 ## ☁️ Google Colab Workflow
 

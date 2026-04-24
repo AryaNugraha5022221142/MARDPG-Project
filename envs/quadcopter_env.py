@@ -350,7 +350,7 @@ class QuadcopterEnv:
             theta_goal = np.arctan2(rel_pos[1], rel_pos[0]) - yaw
             phi_goal = np.arctan2(rel_pos[2], np.sqrt(rel_pos[0]**2 + rel_pos[1]**2))
             
-            vel_norm = self.agents[i].state[6:9] / 3.5
+            vel_norm = np.clip(self.agents[i].state[6:9] / 5.0, -1.0, 1.0)
             
             # Saturation indicator (Bug 14)
             is_saturated = float(getattr(self.agents[i], 'is_saturated', False))
@@ -458,7 +458,11 @@ class QuadcopterEnv:
             
         obs = self._get_observations()
         rewards = np.zeros(self.num_agents, dtype=np.float32)
-        info = {'success': False, 'collision': False, 'agent_dones': self.agent_dones.copy()}
+        info = {'success': False, 'collision': False}
+        info['agent_terminated_now'] = np.zeros(self.num_agents, dtype=bool)
+        
+        sat_rates = [1.0 if getattr(self.agents[i], 'is_saturated', False) else 0.0 for i in range(self.num_agents)]
+        info['sat_rate'] = np.mean(sat_rates)
         
         for i in range(self.num_agents):
             if self.agent_dones[i]: continue
@@ -468,30 +472,18 @@ class QuadcopterEnv:
             dist_to_goal = np.linalg.norm(pos - goal)
             d_min = self._get_min_distance(i)
             
-            weights = self.reward_config['weights']
-            r_transfer = weights.get('transfer', 2.0) * (self.prev_dist_to_goal[i] - dist_to_goal)
+            # Action penalty
+            a_t = actions[i]
+            a_prev = self.prev_actions[i]
+            action_penalty = -0.01 * np.sum((a_t - a_prev)**2)
+
+            r_transfer = 3.0 * (self.prev_dist_to_goal[i] - dist_to_goal)
             self.prev_dist_to_goal[i] = dist_to_goal
             
-            d_margin = 2.0
-            if d_min < d_margin:
-                r_collision = -weights.get('collision', 50.0) * (1.0 - d_min / d_margin)
-            else:
-                r_collision = 0.0
+            collision_penalty = -5.0 * max(0.0, 1.5 - d_min)**2
+            step_penalty = -0.02
             
-            r_smooth = r_smooth_arr[i]
-            r_step = -weights.get('step_penalty', 0.005) * self.M
-            
-            # Free space reward: Encourage staying in open areas
-            min_range = np.min(obs[i, :25]) * self.max_range
-            r_free = weights.get('free_space', 0.05) if min_range > 5.0 else 0.0
-            
-            dense_r = r_transfer + r_collision + r_smooth + r_step + r_free
-            
-            # Scenario logic
-            if self.scenario == 'urban_canyon':
-                alt = pos[2]
-                if (5.0 <= alt <= 15.0) or (30.0 <= alt <= 45.0):
-                    dense_r += 0.5
+            dense_r = r_transfer + action_penalty + collision_penalty + step_penalty
             
             terminal_bonus = 0.0
             
@@ -500,7 +492,7 @@ class QuadcopterEnv:
                 for j, t_pos in enumerate(self.sar_targets):
                     if j not in self.targets_claimed and np.linalg.norm(pos - t_pos) < target_radius:
                         self.targets_claimed.add(j)
-                        terminal_bonus += 50.0
+                        terminal_bonus += 50.0  # SAR bonus
                         self._update_sar_goals()
                         break
             
@@ -508,25 +500,20 @@ class QuadcopterEnv:
             if dist_to_goal < self.goal_dist:
                 if self.scenario != 'search_and_rescue':
                     self.agent_dones[i] = True
-                    terminal_bonus += self.reward_config.get('goal_bonus', 200.0)
+                    info['agent_terminated_now'][i] = True
+                    terminal_bonus += 100.0
             
-            if d_min < self.collision_dist:
+            # Collision check
+            if not self.agent_dones[i] and d_min < self.collision_dist:
                 self.agent_dones[i] = True
+                info['agent_terminated_now'][i] = True
                 info['collision'] = True
-                penalty = self.reward_config.get('collision_penalty', -50.0)
-                # Eliminate RL suicide bug: penalize for all forfeited steps
-                remaining_steps = self.max_steps - self.step_count
-                penalty += (r_step + r_free) * remaining_steps
-                
-                if self.scenario == 'dynamic_intercept':
-                    for o in self.obstacles:
-                        if o.get('is_interceptor') and np.linalg.norm(pos - o['pos']) < (o['radius'] + 0.3):
-                            penalty *= 2.0; break
-                terminal_bonus += penalty
+                terminal_bonus += -100.0
             
             rewards[i] = dense_r + terminal_bonus
-            
             self.safety_frontier[i] = min(self.safety_frontier[i], d_min)
+
+        info['agent_dones'] = self.agent_dones.copy()
 
         if self.cooperative:
             team_r = np.sum(rewards) / self.num_agents

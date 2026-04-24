@@ -34,17 +34,12 @@ class SequenceReplayBuffer:
         self.current_episode = []
 
     def push(self, obs: np.ndarray, actions: np.ndarray, rewards: np.ndarray, 
-             next_obs: np.ndarray, dones: np.ndarray, 
-             actor_hidden: List[Tuple[np.ndarray, np.ndarray]], 
-             critic_hidden: List[Tuple[np.ndarray, np.ndarray]],
-             episode_done: bool):
+             next_obs: np.ndarray, dones: np.ndarray, episode_done: bool):
         """
         Adds a transition to the current episode.
-        actor_hidden: list of (h, c) for each agent's actor at the START of this transition
-        critic_hidden: list of (h, c) for each agent's critic at the START of this transition
         episode_done: True if the entire episode is over
         """
-        self.current_episode.append((obs, actions, rewards, next_obs, dones, actor_hidden, critic_hidden))
+        self.current_episode.append((obs, actions, rewards, next_obs, dones))
         
         if episode_done:
             self.buffer.append(self.current_episode)
@@ -58,34 +53,25 @@ class SequenceReplayBuffer:
     def sample(self, batch_size: int, seq_len: int):
         """
         Samples a batch of sequences.
-        Returns stacked numpy arrays and initial hidden states.
+        Returns stacked numpy arrays and padding masks.
         """
-        # Filter out episodes that are too short
-        valid_episodes = [ep for ep in self.buffer if len(ep) >= seq_len]
+        valid_episodes = list(self.buffer)
         if not valid_episodes:
-            valid_episodes = list(self.buffer)
+            return None
             
         sampled_episodes = random.choices(valid_episodes, k=batch_size)
         
-        obs_batch = []
-        actions_batch = []
-        rewards_batch = []
-        next_obs_batch = []
-        dones_batch = []
-        actor_h_batch = [] # List of (num_agents, (h, c))
-        critic_h_batch = [] # List of (num_agents, (h, c))
+        obs_batch, actions_batch, rewards_batch = [], [], []
+        next_obs_batch, dones_batch, mask_batch = [], [], []
         
         for ep in sampled_episodes:
             if len(ep) > seq_len:
                 start_idx = random.randint(0, len(ep) - seq_len)
+                seq = ep[start_idx : start_idx + seq_len]
+                pad_len = 0
             else:
-                start_idx = 0
-            
-            seq = ep[start_idx : start_idx + seq_len]
-            
-            # Initial hidden states for this sequence
-            actor_h_batch.append(seq[0][5])
-            critic_h_batch.append(seq[0][6])
+                seq = ep
+                pad_len = seq_len - len(ep)
             
             obs_seq = np.stack([item[0] for item in seq])
             act_seq = np.stack([item[1] for item in seq])
@@ -93,48 +79,25 @@ class SequenceReplayBuffer:
             nobs_seq = np.stack([item[3] for item in seq])
             done_seq = np.stack([item[4] for item in seq])
             
-            if len(seq) < seq_len:
-                pad_len = seq_len - len(seq)
+            mask_seq = np.ones((len(seq), 1), dtype=np.float32)
+            
+            if pad_len > 0:
                 obs_seq = np.pad(obs_seq, ((0, pad_len), (0, 0), (0, 0)), mode='edge')
                 act_seq = np.pad(act_seq, ((0, pad_len), (0, 0), (0, 0)), mode='edge')
-                rew_seq = np.pad(rew_seq, ((0, pad_len), (0, 0)), mode='edge')
+                rew_seq = np.pad(rew_seq, ((0, pad_len), (0, 0)), mode='constant', constant_values=0.0)
                 nobs_seq = np.pad(nobs_seq, ((0, pad_len), (0, 0), (0, 0)), mode='edge')
-                done_seq = np.pad(done_seq, ((0, pad_len), (0, 0)), mode='edge')
+                done_seq = np.pad(done_seq, ((0, pad_len), (0, 0)), mode='constant', constant_values=1.0)
+                mask_seq = np.pad(mask_seq, ((0, pad_len), (0, 0)), mode='constant', constant_values=0.0)
                 
             obs_batch.append(obs_seq)
             actions_batch.append(act_seq)
             rewards_batch.append(rew_seq)
             next_obs_batch.append(nobs_seq)
             dones_batch.append(done_seq)
-            
-        def process_hidden(h_batch):
-            num_agents = len(h_batch[0])
-            h_init = []
-            c_init = []
-            for i in range(num_agents):
-                # h_agent_batch: (batch, num_layers, 1, hidden_dim)
-                h_agent_batch = np.stack([hb[i][0] for hb in h_batch])
-                c_agent_batch = np.stack([hb[i][1] for hb in h_batch])
-                
-                # Reshape to (num_layers, batch, hidden_dim)
-                # First, remove the singleton dimension at index 2
-                h_agent_batch = np.squeeze(h_agent_batch, axis=2)
-                c_agent_batch = np.squeeze(c_agent_batch, axis=2)
-                
-                # Then transpose from (batch, num_layers, hidden_dim) to (num_layers, batch, hidden_dim)
-                h_agent_batch = np.transpose(h_agent_batch, (1, 0, 2))
-                c_agent_batch = np.transpose(c_agent_batch, (1, 0, 2))
-                
-                h_init.append(h_agent_batch)
-                c_init.append(c_agent_batch)
-            return h_init, c_init
-
-        actor_h_init, actor_c_init = process_hidden(actor_h_batch)
-        critic_h_init, critic_c_init = process_hidden(critic_h_batch)
+            mask_batch.append(mask_seq)
             
         return (np.stack(obs_batch), np.stack(actions_batch), np.stack(rewards_batch), 
-                np.stack(next_obs_batch), np.stack(dones_batch), 
-                (actor_h_init, actor_c_init), (critic_h_init, critic_c_init))
+                np.stack(next_obs_batch), np.stack(dones_batch), np.stack(mask_batch))
 
     def __len__(self) -> int:
         return len(self.buffer)

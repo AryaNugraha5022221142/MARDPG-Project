@@ -101,9 +101,6 @@ def main():
 
     # Training Loop
     num_episodes = args.num_episodes if args.num_episodes is not None else config['training']['num_episodes']
-    epsilon = config['learning']['epsilon_start']
-    epsilon_end = config['learning']['epsilon_end']
-    epsilon_decay = config['learning']['epsilon_decay']
     
     recent_rewards = deque(maxlen=100)
     recent_success = deque(maxlen=100)
@@ -116,6 +113,8 @@ def main():
     # Academic Data Tracking
     reward_history = []
     success_history = []
+    recent_sat_rates = deque(maxlen=100)
+    recent_act_stds = deque(maxlen=100)
     global_step_count = 0
     
     print(f"Starting training for {num_episodes} episodes...")
@@ -129,26 +128,23 @@ def main():
         
         episode_reward = 0
         done = False
+        episode_sat_rates = []
+        episode_act_stds = []
         
         while not done:
             if args.render:
                 env.render()
                 
             if args.agent == 'mardpg':
-                # Store hidden states at the START of the transition
-                actor_hidden_np = []
-                for h, c in actor_hidden:
-                    actor_hidden_np.append((h.cpu().numpy(), c.cpu().numpy()))
-                
-                critic_hidden_np = []
-                for h, c in critic_hidden:
-                    critic_hidden_np.append((h.cpu().numpy(), c.cpu().numpy()))
-                
                 actions, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden)
             else:
-                actions = agent.select_actions(obs, epsilon)
+                actions = agent.select_actions(obs)
+                
+            episode_act_stds.append(np.std(actions))
                 
             next_obs, rewards, terminated, truncated, info = env.step(actions)
+            
+            episode_sat_rates.append(info.get('sat_rate', 0.0))
             
             # Per-agent done flags for the buffer
             dones = info['agent_dones'].astype(np.float32)
@@ -158,7 +154,7 @@ def main():
             global_step_count += 1
             
             if args.agent == 'mardpg':
-                agent.memory.push(obs, np.array(actions), rewards, next_obs, dones, actor_hidden_np, critic_hidden_np, done)
+                agent.memory.push(obs, np.array(actions), rewards, next_obs, dones, done)
             else:
                 agent.memory.push(obs, np.array(actions), rewards, next_obs, dones)
             
@@ -173,13 +169,14 @@ def main():
             
         recent_rewards.append(episode_reward)
         recent_success.append(1.0 if info.get('success', False) else 0.0)
+        recent_sat_rates.append(np.mean(episode_sat_rates))
+        recent_act_stds.append(np.mean(episode_act_stds))
         
         reward_history.append(episode_reward)
         success_history.append(1.0 if info.get('success', False) else 0.0)
         
-        epsilon = max(epsilon_end, epsilon * epsilon_decay)
-        
         # Update Curriculum
+
         if episode % 100 == 0:
             success_rate = np.mean(recent_success)
             if len(recent_success) == 100 and success_rate >= success_threshold and curriculum_level < 4:
@@ -195,9 +192,11 @@ def main():
         if episode % config['logging']['log_interval'] == 0:
             avg_reward = np.mean(recent_rewards)
             success_rate = np.mean(recent_success) if len(recent_success) > 0 else 0.0
+            avg_sat = np.mean(recent_sat_rates) if len(recent_sat_rates) > 0 else 0.0
+            avg_act_std = np.mean(recent_act_stds) if len(recent_act_stds) > 0 else 0.0
             
-            # Use actual sigma for continuous agents (MARDPG/MADDPG), else fallback to epsilon
-            current_sigma = agent.noise[0].sigma if hasattr(agent, 'noise') else epsilon
+            # Use actual sigma for continuous agents (MARDPG/MADDPG)
+            current_sigma = agent.noise[0].sigma if hasattr(agent, 'noise') else 0.0
             
             pbar.set_postfix({'Level': curriculum_level, 'Reward': f'{avg_reward:.2f}', 'Success': f'{success_rate:.2f}', 'Sigma': f'{current_sigma:.3f}'})
             
@@ -207,19 +206,21 @@ def main():
                     'curriculum_level': curriculum_level,
                     'avg_reward': avg_reward,
                     'success_rate': success_rate,
-                    'sigma': current_sigma
+                    'sigma': current_sigma,
+                    'sat_rate': avg_sat,
+                    'action_std': avg_act_std
                 })
                 
         if episode % config['logging']['save_interval'] == 0:
             save_path = os.path.join(config['logging']['checkpoint_dir'], f"{args.agent}_ep{episode}.pt")
-            agent.save(save_path, epsilon, episode)
+            agent.save(save_path, 0.0, episode)
             
     if args.render:
         env.close()
             
     # Final save
     final_path = os.path.join(config['logging']['checkpoint_dir'], f"{args.agent}_final.pt")
-    agent.save(final_path, epsilon, num_episodes)
+    agent.save(final_path, 0.0, num_episodes)
     
     # Save metrics to JSON if requested
     if args.output_json:

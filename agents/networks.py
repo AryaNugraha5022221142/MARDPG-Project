@@ -55,9 +55,9 @@ class ActorLSTM(nn.Module):
 class CriticLSTM(nn.Module):
     """
     Centralized Critic network (MARDPG style).
-    Takes actor hidden states and joint actions.
+    Takes joint observations and joint actions directly.
     """
-    def __init__(self, obs_dim: int = 33, action_dim: int = 4, num_agents: int = 3, hidden_dim: int = 128, num_layers: int = 1, independent: bool = False, critic_hidden_dim: int = 128):
+    def __init__(self, obs_dim: int = 34, action_dim: int = 4, num_agents: int = 3, hidden_dim: int = 128, num_layers: int = 1, independent: bool = False, critic_hidden_dim: int = 128):
         super(CriticLSTM, self).__init__()
         self.hidden_dim = hidden_dim
         self.critic_hidden_dim = critic_hidden_dim
@@ -65,11 +65,12 @@ class CriticLSTM(nn.Module):
         self.independent = independent
         
         if independent:
-            input_dim = hidden_dim + action_dim
+            input_dim = obs_dim + action_dim
         else:
-            input_dim = (hidden_dim * num_agents) + (action_dim * num_agents)
-        
-        self.lstm = nn.LSTM(input_dim, critic_hidden_dim, num_layers, batch_first=True)
+            input_dim = (obs_dim * num_agents) + (action_dim * num_agents)
+            
+        self.fc_embed = nn.Linear(input_dim, critic_hidden_dim)
+        self.lstm = nn.LSTM(critic_hidden_dim, critic_hidden_dim, num_layers, batch_first=True)
         self.fc_out = nn.Linear(critic_hidden_dim, 1)
 
     def init_hidden(self, batch_size: int = 1, device: str = 'cpu') -> Tuple[torch.Tensor, torch.Tensor]:
@@ -77,23 +78,24 @@ class CriticLSTM(nn.Module):
         c0 = torch.zeros(self.num_layers, batch_size, self.critic_hidden_dim).to(device)
         return (h0, c0)
 
-    def forward(self, actor_hidden_states: torch.Tensor, actions: torch.Tensor, hidden: Tuple[torch.Tensor, torch.Tensor] = None, agent_idx: int = None) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+    def forward(self, obs: torch.Tensor, actions: torch.Tensor, hidden: Tuple[torch.Tensor, torch.Tensor] = None, agent_idx: int = None) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
-        actor_hidden_states: (batch_size, seq_len, num_agents, hidden_dim)
+        obs: (batch_size, seq_len, num_agents, obs_dim)
         actions: (batch_size, seq_len, num_agents, action_dim)
         """
-        batch_size = actor_hidden_states.size(0)
-        seq_len = actor_hidden_states.size(1)
+        batch_size = obs.size(0)
+        seq_len = obs.size(1)
         
         if self.independent:
-            h = actor_hidden_states[:, :, agent_idx, :]
-            a = actions[:, :, agent_idx, :]
-            x = torch.cat([h, a], dim=2)
+            o_in = obs[:, :, agent_idx, :]
+            a_in = actions[:, :, agent_idx, :]
+            x = torch.cat([o_in, a_in], dim=2)
         else:
-            h_flat = actor_hidden_states.view(batch_size, seq_len, -1)
+            o_flat = obs.view(batch_size, seq_len, -1)
             a_flat = actions.view(batch_size, seq_len, -1)
-            x = torch.cat([h_flat, a_flat], dim=2)
-        
+            x = torch.cat([o_flat, a_flat], dim=2)
+            
+        x = F.relu(self.fc_embed(x))
         if hidden is None:
             hidden = self.init_hidden(batch_size, x.device)
             

@@ -6,26 +6,23 @@ training:
 
 network:
   actor:
-    hidden_dim: 256       # was 128 — larger for 33-dim input
+    hidden_dim: 256       # larger for 34-dim input
     lstm_layers: 1
     dropout: 0.0
-    fc_dims: [256, 128]
   critic:
     hidden_dim: 256
-    fc_dims: [512, 256, 128]
+    lstm_layers: 1
 
 learning:
   actor_lr: 0.0001
   critic_lr: 0.001
-  epsilon_start: 1.0
-  epsilon_end: 0.05
-  epsilon_decay: 0.9995
+  gamma: 0.99
   max_grad_norm: 1.0
 
 memory:
   buffer_size: 500       # was 2000; with 2000-step eps this is still 1M transitions
   batch_size: 32
-  seq_len: 64            # was 16; covers 6.4s of sim at dt=0.01x10
+  seq_len: 24            # 8 burn_in + 16 train_len = 24
 
 update_interval: 50      # was missing (defaulted to 10, too aggressive)
 
