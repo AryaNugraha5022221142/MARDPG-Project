@@ -9,20 +9,27 @@ import copy
 from .networks import Actor, Critic
 from .replay_buffer import ReplayBuffer
 
-class GaussianNoise:
-    def __init__(self, action_dim, mu=0.0, sigma=0.1):
-        self.mu = mu
-        self.sigma = sigma
+class AdaptiveGaussianNoise:
+    """
+    Gaussian Noise for continuous action exploration with annealing.
+    """
+    def __init__(self, action_dim, sigma_start=0.5, sigma_end=0.05, total_steps=500000):
+        self.sigma = sigma_start
+        self.sigma_end = sigma_end
+        self.decay = (sigma_start - sigma_end) / total_steps
         self.action_dim = action_dim
 
     def sample(self):
-        return np.random.normal(self.mu, self.sigma, self.action_dim)
+        return np.random.normal(0, self.sigma, self.action_dim)
+        
+    def step(self):
+        self.sigma = max(self.sigma_end, self.sigma - self.decay)
 
 class MADDPG:
     """
     Multi-Agent Deterministic Policy Gradient (MADDPG) - Non-Recurrent Baseline
     """
-    def __init__(self, obs_dim: int = 33, action_dim: int = 4, num_agents: int = 3, 
+    def __init__(self, obs_dim: int = 34, action_dim: int = 4, num_agents: int = 3, 
                  config: Dict[str, Any] = None, device: str = 'cpu'):
         self.obs_dim = obs_dim
         self.action_dim = action_dim
@@ -55,7 +62,7 @@ class MADDPG:
         self.critics_target = copy.deepcopy(self.critics)
         
         # Noise
-        self.noise = GaussianNoise(action_dim, sigma=config.get('noise_sigma', 0.1))
+        self.noise = [AdaptiveGaussianNoise(action_dim) for _ in range(num_agents)]
         
         # Optimizers
         actor_lr = config['learning'].get('actor_lr', 1e-4)
@@ -68,7 +75,7 @@ class MADDPG:
         buffer_size = config['memory'].get('buffer_size', 100000)
         self.memory = ReplayBuffer(buffer_size)
 
-    def select_actions(self, obs: np.ndarray, noise_scale: float = 0.0) -> np.ndarray:
+    def select_actions(self, obs: np.ndarray, explore: bool = True) -> np.ndarray:
         """
         Selects actions for all agents.
         obs: (num_agents, obs_dim)
@@ -81,9 +88,11 @@ class MADDPG:
                 obs_tensor = torch.FloatTensor(obs[i]).unsqueeze(0).to(self.device) # (1, obs_dim)
                 action = self.actor(obs_tensor, agent_idx=i).cpu().numpy().squeeze(0)
                 
-                if noise_scale > 0:
-                    noise = self.noise.sample() * noise_scale
-                    action = np.clip(action + noise, -3.5, 3.5)
+                if explore:
+                    action += self.noise[i].sample()
+                    self.noise[i].step()
+                
+                action = np.clip(action, -1.0, 1.0)
                 
                 actions.append(action)
                 

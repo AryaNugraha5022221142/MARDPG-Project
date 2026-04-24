@@ -35,9 +35,11 @@ def main():
         scenario=args.scenario
     )
     
+    obs_dim = env.observation_space.shape[1]
+    
     if args.agent in ['mardpg', 'iddpg']:
         agent = MARDPG(
-            obs_dim=33, 
+            obs_dim=obs_dim, 
             action_dim=4, 
             num_agents=config['training']['num_agents'], 
             config=config, 
@@ -46,7 +48,7 @@ def main():
         )
     else:
         agent = MADDPG(
-            obs_dim=33, 
+            obs_dim=obs_dim, 
             action_dim=4, 
             num_agents=config['training']['num_agents'], 
             config=config, 
@@ -88,9 +90,9 @@ def main():
                 ep_trajectories[i].append(env.agents[i].state[:3].copy())
                 
             if args.agent in ['mardpg', 'iddpg']:
-                actions, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden, noise_scale=0.0) # Greedy
+                actions, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden, explore=False)
             else:
-                actions = agent.select_actions(obs, noise_scale=0.0)
+                actions = agent.select_actions(obs, explore=False)
                 
             obs, rewards, terminated, truncated, info = env.step(actions)
             done = terminated or truncated

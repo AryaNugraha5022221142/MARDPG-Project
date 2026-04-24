@@ -79,12 +79,14 @@ class MARDPG:
 
     def select_actions(self, obs: np.ndarray, 
                        actor_hidden: List[Tuple[torch.Tensor, torch.Tensor]], 
-                       critic_hidden: List[Tuple[torch.Tensor, torch.Tensor]]) -> Tuple[np.ndarray, List[Tuple[torch.Tensor, torch.Tensor]], List[Tuple[torch.Tensor, torch.Tensor]]]:
+                       critic_hidden: List[Tuple[torch.Tensor, torch.Tensor]],
+                       explore: bool = True) -> Tuple[np.ndarray, List[Tuple[torch.Tensor, torch.Tensor]], List[Tuple[torch.Tensor, torch.Tensor]]]:
         """
         Selects continuous actions for all agents and updates both actor and critic hidden states.
         obs: (num_agents, obs_dim)
         actor_hidden: list of (h, c) for each agent's actor
         critic_hidden: list of (h, c) for each agent's critic
+        explore: whether to add exploration noise
         """
         actions = []
         new_actor_hidden = []
@@ -106,10 +108,11 @@ class MARDPG:
                 action = action.cpu().numpy().flatten()
                 
                 # Add Gaussian Noise
-                action += self.noise[i].sample()
-                self.noise[i].step() # anneal after each call
+                if explore:
+                    action += self.noise[i].sample()
+                    self.noise[i].step() # anneal after each call
                 
-                action = np.clip(action, -3.5, 3.5)
+                action = np.clip(action, -1.0, 1.0)
                 actions.append(action)
                 
                 # Store hidden state for critic
@@ -119,14 +122,12 @@ class MARDPG:
             
             actions_np = np.array(actions)
             actions_tensor = torch.FloatTensor(actions_np).unsqueeze(0).unsqueeze(0).to(self.device) # (1, 1, num_agents, action_dim)
-            actor_hiddens_tensor = torch.cat(actor_hiddens, dim=0).unsqueeze(0).to(self.device) # (1, num_agents, 1, hidden_dim)
-            # Need shape (batch, seq, num_agents, hidden_dim) -> (1, 1, num_agents, hidden_dim)
-            actor_hiddens_tensor = actor_hiddens_tensor.transpose(1, 2)
+            obs_tensor = torch.FloatTensor(obs).unsqueeze(0).unsqueeze(0).to(self.device) # (1, 1, num_agents, obs_dim)
             
             # 2. Update Critic hidden states (even if we don't use the Q-values)
             for i in range(self.num_agents):
                 h, c = critic_hidden[i]
-                _, (new_h, new_c) = self.critics[i](actor_hiddens_tensor, actions_tensor, (h, c), agent_idx=i)
+                _, (new_h, new_c) = self.critics[i](obs_tensor, actions_tensor, (h, c), agent_idx=i)
                 new_critic_hidden.append((new_h, new_c))
                 
         self.actor.train()
