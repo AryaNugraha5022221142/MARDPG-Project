@@ -202,11 +202,13 @@ class QuadcopterEnv:
         # Random start positions on the "left" side
         for i in range(self.num_agents):
             start_pos = np.array([
-                np.random.uniform(2.0, 8.0),
-                np.random.uniform(5.0, self.arena_size[1] - 5.0),
-                np.random.uniform(2.0, self.arena_size[2] - 2.0)
+                np.random.uniform(4.0, 8.0),
+                np.random.uniform(8.0, self.arena_size[1] - 8.0),
+                np.random.uniform(4.0, self.arena_size[2] - 4.0)
             ])
-            start_yaw = np.random.uniform(-np.pi, np.pi)
+            goal = self.goals[i]
+            rough_dir = np.arctan2(goal[1] - start_pos[1], goal[0] - start_pos[0])
+            start_yaw = rough_dir + np.random.uniform(-np.pi/4, np.pi/4)  # ±45° random
             self.agents[i].reset(start_pos, start_yaw)
             self.prev_dist_to_goal[i] = np.linalg.norm(start_pos - self.goals[i])
             
@@ -501,14 +503,17 @@ class QuadcopterEnv:
                 if self.scenario != 'search_and_rescue':
                     self.agent_dones[i] = True
                     info['agent_terminated_now'][i] = True
-                    terminal_bonus += 100.0
+                    terminal_bonus += self.reward_config.get('goal_bonus', 50.0)
             
             # Collision check
             if not self.agent_dones[i] and d_min < self.collision_dist:
                 self.agent_dones[i] = True
                 info['agent_terminated_now'][i] = True
                 info['collision'] = True
-                terminal_bonus += -100.0
+                penalty = self.reward_config.get('collision_penalty', -20.0)
+                penalty_scale = 2.0
+                penalty *= penalty_scale
+                terminal_bonus += penalty
             
             rewards[i] = dense_r + terminal_bonus
             self.safety_frontier[i] = min(self.safety_frontier[i], d_min)
@@ -524,8 +529,13 @@ class QuadcopterEnv:
         if self.scenario == 'search_and_rescue' and len(self.targets_claimed) == len(self.sar_targets):
             terminated = True
             info['success'] = True
-        elif np.all(self.agent_dones) and not info['collision']:
-            info['success'] = True
+            info['individual_success_rate'] = len(self.targets_claimed) / max(1, len(self.sar_targets))
+        else:
+            individual_successes = sum(1 for i in range(self.num_agents) 
+                                      if self.agent_dones[i] and 
+                                      np.linalg.norm(self.agents[i].state[0:3] - self.goals[i]) < self.goal_dist)
+            info['individual_success_rate'] = individual_successes / self.num_agents
+            info['success'] = (individual_successes >= 1)
             
         truncated = self.step_count >= self.max_steps
         self.last_info = info

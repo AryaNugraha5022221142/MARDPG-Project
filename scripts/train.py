@@ -107,7 +107,7 @@ def main():
     
     # Curriculum Learning
     curriculum_level = 0
-    success_threshold = 0.6  # 60% success to move to next level
+    success_threshold = 0.15  # 15% success to move to next level
     env.set_curriculum_level(curriculum_level)
     
     # Academic Data Tracking
@@ -168,12 +168,12 @@ def main():
             episode_reward += np.sum(rewards)
             
         recent_rewards.append(episode_reward)
-        recent_success.append(1.0 if info.get('success', False) else 0.0)
+        recent_success.append(info.get('individual_success_rate', 0.0))
         recent_sat_rates.append(np.mean(episode_sat_rates))
         recent_act_stds.append(np.mean(episode_act_stds))
         
         reward_history.append(episode_reward)
-        success_history.append(1.0 if info.get('success', False) else 0.0)
+        success_history.append(info.get('individual_success_rate', 0.0))
         
         # Update Curriculum
 

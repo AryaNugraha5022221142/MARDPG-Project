@@ -64,7 +64,10 @@ class MARDPG:
         self.critics_target = [copy.deepcopy(c).to(self.device) for c in self.critics]
         
         # Noise (Gaussian for continuous)
-        self.noise = [AdaptiveGaussianNoise(action_dim) for _ in range(num_agents)]
+        self.noise = [AdaptiveGaussianNoise(action_dim,
+                                            sigma_start=1.2,
+                                            sigma_end=0.15,
+                                            total_steps=12_000_000) for _ in range(num_agents)]
         
         # Optimizers
         actor_lr = config['learning'].get('actor_lr', 1e-4)
@@ -151,6 +154,7 @@ class MARDPG:
         obs = torch.FloatTensor(obs_seq).to(self.device)
         actions = torch.FloatTensor(act_seq).to(self.device)
         rewards = torch.FloatTensor(rew_seq).to(self.device)
+        rewards = torch.clamp(rewards, -5.0, 10.0)
         next_obs = torch.FloatTensor(nobs_seq).to(self.device)
         dones = torch.FloatTensor(done_seq).to(self.device)
         masks = torch.FloatTensor(mask_seq).to(self.device).squeeze(-1) # (batch, seq)
