@@ -67,7 +67,7 @@ class MARDPG:
         self.noise = [AdaptiveGaussianNoise(action_dim,
                                             sigma_start=1.2,
                                             sigma_end=0.15,
-                                            total_steps=12_000_000) for _ in range(num_agents)]
+                                            total_steps=1_000_000) for _ in range(num_agents)]
         
         # Optimizers
         actor_lr = config['learning'].get('actor_lr', 1e-4)
