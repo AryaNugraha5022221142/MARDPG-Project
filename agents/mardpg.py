@@ -64,10 +64,12 @@ class MARDPG:
         self.critics_target = [copy.deepcopy(c).to(self.device) for c in self.critics]
         
         # Noise (Gaussian for continuous)
+        # Set total steps to a reasonable estimate: 150 avg steps/ep * 2000 episodes = 300,000 steps.
+        # This allows exploration to organically decay properly
         self.noise = [AdaptiveGaussianNoise(action_dim,
                                             sigma_start=1.2,
                                             sigma_end=0.15,
-                                            total_steps=6_000_000) for _ in range(num_agents)]
+                                            total_steps=300_000) for _ in range(num_agents)]
         
         # Optimizers
         actor_lr = config['learning'].get('actor_lr', 1e-4)

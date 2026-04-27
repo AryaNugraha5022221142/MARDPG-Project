@@ -120,108 +120,112 @@ def main():
     print(f"Starting training for {num_episodes} episodes...")
 
     pbar = tqdm(range(1, num_episodes + 1), desc="Training")
-    for episode in pbar:
-        obs, _ = env.reset()
-        if args.agent == 'mardpg':
-            actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
-            critic_hidden = [agent.critics[i].init_hidden(1, device) for i in range(env.num_agents)]
-        
-        episode_reward = 0
-        done = False
-        episode_sat_rates = []
-        episode_act_stds = []
-        
-        while not done:
-            if args.render:
-                env.render()
-                
+    try:
+        for episode in pbar:
+            obs, _ = env.reset()
             if args.agent == 'mardpg':
-                actions, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden)
-            else:
-                actions = agent.select_actions(obs)
+                actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
+                critic_hidden = [agent.critics[i].init_hidden(1, device) for i in range(env.num_agents)]
+            
+            episode_reward = 0
+            done = False
+            episode_sat_rates = []
+            episode_act_stds = []
+            
+            while not done:
+                if args.render:
+                    env.render()
+                    
+                if args.agent == 'mardpg':
+                    actions, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden)
+                else:
+                    actions = agent.select_actions(obs)
+                    
+                episode_act_stds.append(np.std(actions))
+                    
+                next_obs, rewards, terminated, truncated, info = env.step(actions)
                 
-            episode_act_stds.append(np.std(actions))
+                episode_sat_rates.append(info.get('sat_rate', 0.0))
                 
-            next_obs, rewards, terminated, truncated, info = env.step(actions)
-            
-            episode_sat_rates.append(info.get('sat_rate', 0.0))
-            
-            # Per-agent done flags for the buffer
-            dones = info['agent_dones'].astype(np.float32)
-            
-            # Episode is over if all agents are done or max steps reached
-            done = terminated or truncated
-            global_step_count += 1
-            
-            if args.agent == 'mardpg':
-                agent.memory.push(obs, np.array(actions), rewards, next_obs, dones, done)
-            else:
-                agent.memory.push(obs, np.array(actions), rewards, next_obs, dones)
-            
-            # Only update if we have enough episodes in the buffer
-            if len(agent.memory) >= config['memory'].get('batch_size', 32) and global_step_count % config.get('update_interval', 10) == 0:
-                loss_dict = agent.update()
-            else:
-                loss_dict = {}
-            
-            obs = next_obs
-            episode_reward += np.sum(rewards)
-            
-        recent_rewards.append(episode_reward)
-        recent_success.append(info.get('individual_success_rate', 0.0))
-        recent_sat_rates.append(np.mean(episode_sat_rates))
-        recent_act_stds.append(np.mean(episode_act_stds))
-        
-        reward_history.append(episode_reward)
-        success_history.append(info.get('individual_success_rate', 0.0))
-        
-        # Collect metrics prior to any buffer clears
-        current_avg_reward = np.mean(recent_rewards) if len(recent_rewards) > 0 else 0.0
-        current_success_rate = np.mean(recent_success) if len(recent_success) > 0 else 0.0
-        current_sat_rate = np.mean(recent_sat_rates) if len(recent_sat_rates) > 0 else 0.0
-        current_act_std = np.mean(recent_act_stds) if len(recent_act_stds) > 0 else 0.0
-
-        # Update Curriculum
-
-        if episode % 100 == 0:
-            if len(recent_success) == 100 and current_success_rate >= success_threshold and curriculum_level < 4:
-                curriculum_level += 1
-                env.set_curriculum_level(curriculum_level)
-                # Flush buffer on curriculum change to prevent stale data corruption
-                if hasattr(agent.memory, 'clear'):
-                    agent.memory.clear()
-                    print(f"Curriculum Level Up! Level: {curriculum_level}. Buffer cleared.")
-                # Reset success buffer to allow agent to adapt to new difficulty
-                recent_success.clear()
-        
-        if episode % config['logging']['log_interval'] == 0:
-            avg_reward = current_avg_reward
-            success_rate = current_success_rate
-            avg_sat = current_sat_rate
-            avg_act_std = current_act_std
-            
-            # Use actual sigma for continuous agents (MARDPG/MADDPG)
-            current_sigma = agent.noise[0].sigma if hasattr(agent, 'noise') else 0.0
-            
-            pbar.set_postfix({'Level': curriculum_level, 'Reward': f'{avg_reward:.2f}', 'Success': f'{success_rate:.2f}', 'Sigma': f'{current_sigma:.3f}'})
-            
-            if use_wandb:
-                wandb.log({
-                    'episode': episode,
-                    'curriculum_level': curriculum_level,
-                    'avg_reward': avg_reward,
-                    'success_rate': success_rate,
-                    'sigma': current_sigma,
-                    'sat_rate': avg_sat,
-                    'action_std': avg_act_std
-                })
+                # Per-agent done flags for the buffer
+                dones = info['agent_dones'].astype(np.float32)
                 
-        if episode % config['logging']['save_interval'] == 0:
-            save_path = os.path.join(config['logging']['checkpoint_dir'], f"{args.agent}_ep{episode}.pt")
-            agent.save(save_path, 0.0, episode)
+                # Episode is over if all agents are done or max steps reached
+                done = terminated or truncated
+                global_step_count += 1
+                
+                if args.agent == 'mardpg':
+                    agent.memory.push(obs, np.array(actions), rewards, next_obs, dones, done)
+                else:
+                    agent.memory.push(obs, np.array(actions), rewards, next_obs, dones)
+                
+                # Only update if we have enough episodes in the buffer
+                if len(agent.memory) >= config['memory'].get('batch_size', 32) and global_step_count % config.get('update_interval', 10) == 0:
+                    loss_dict = agent.update()
+                else:
+                    loss_dict = {}
+                
+                obs = next_obs
+                episode_reward += np.sum(rewards)
+                
+            recent_rewards.append(episode_reward)
+            recent_success.append(info.get('individual_success_rate', 0.0))
+            recent_sat_rates.append(np.mean(episode_sat_rates))
+            recent_act_stds.append(np.mean(episode_act_stds))
             
-    if args.render:
-        env.close()
+            reward_history.append(episode_reward)
+            success_history.append(info.get('individual_success_rate', 0.0))
+            
+            # Collect metrics prior to any buffer clears
+            current_avg_reward = np.mean(recent_rewards) if len(recent_rewards) > 0 else 0.0
+            current_success_rate = np.mean(recent_success) if len(recent_success) > 0 else 0.0
+            current_sat_rate = np.mean(recent_sat_rates) if len(recent_sat_rates) > 0 else 0.0
+            current_act_std = np.mean(recent_act_stds) if len(recent_act_stds) > 0 else 0.0
+    
+            # Update Curriculum
+    
+            if episode % 100 == 0:
+                if len(recent_success) == 100 and current_success_rate >= success_threshold and curriculum_level < 4:
+                    curriculum_level += 1
+                    env.set_curriculum_level(curriculum_level)
+                    # Flush buffer on curriculum change to prevent stale data corruption
+                    if hasattr(agent.memory, 'clear'):
+                        agent.memory.clear()
+                        print(f"Curriculum Level Up! Level: {curriculum_level}. Buffer cleared.")
+                    # Reset success buffer to allow agent to adapt to new difficulty
+                    recent_success.clear()
+            
+            if episode % config['logging']['log_interval'] == 0:
+                avg_reward = current_avg_reward
+                success_rate = current_success_rate
+                avg_sat = current_sat_rate
+                avg_act_std = current_act_std
+                
+                # Use actual sigma for continuous agents (MARDPG/MADDPG)
+                current_sigma = agent.noise[0].sigma if hasattr(agent, 'noise') else 0.0
+                
+                pbar.set_postfix({'Level': curriculum_level, 'Reward': f'{avg_reward:.2f}', 'Success': f'{success_rate:.2f}', 'Sigma': f'{current_sigma:.3f}'})
+                
+                if use_wandb:
+                    wandb.log({
+                        'episode': episode,
+                        'curriculum_level': curriculum_level,
+                        'avg_reward': avg_reward,
+                        'success_rate': success_rate,
+                        'sigma': current_sigma,
+                        'sat_rate': avg_sat,
+                        'action_std': avg_act_std
+                    })
+                    
+            if episode % config['logging']['save_interval'] == 0:
+                save_path = os.path.join(config['logging']['checkpoint_dir'], f"{args.agent}_ep{episode}.pt")
+                agent.save(save_path, 0.0, episode)
+                
+        if args.render:
+            env.close()
+    except KeyboardInterrupt:
+        print("\nTraining interrupted by user! Saving current progress and generating plots...")
+        num_episodes = episode  # Update num_episodes to reflect actual episodes trained
             
     # Final save
     final_path = os.path.join(config['logging']['checkpoint_dir'], f"{args.agent}_final.pt")
