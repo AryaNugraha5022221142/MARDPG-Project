@@ -175,11 +175,16 @@ def main():
         reward_history.append(episode_reward)
         success_history.append(info.get('individual_success_rate', 0.0))
         
+        # Collect metrics prior to any buffer clears
+        current_avg_reward = np.mean(recent_rewards) if len(recent_rewards) > 0 else 0.0
+        current_success_rate = np.mean(recent_success) if len(recent_success) > 0 else 0.0
+        current_sat_rate = np.mean(recent_sat_rates) if len(recent_sat_rates) > 0 else 0.0
+        current_act_std = np.mean(recent_act_stds) if len(recent_act_stds) > 0 else 0.0
+
         # Update Curriculum
 
         if episode % 100 == 0:
-            success_rate = np.mean(recent_success)
-            if len(recent_success) == 100 and success_rate >= success_threshold and curriculum_level < 4:
+            if len(recent_success) == 100 and current_success_rate >= success_threshold and curriculum_level < 4:
                 curriculum_level += 1
                 env.set_curriculum_level(curriculum_level)
                 # Flush buffer on curriculum change to prevent stale data corruption
@@ -190,10 +195,10 @@ def main():
                 recent_success.clear()
         
         if episode % config['logging']['log_interval'] == 0:
-            avg_reward = np.mean(recent_rewards)
-            success_rate = np.mean(recent_success) if len(recent_success) > 0 else 0.0
-            avg_sat = np.mean(recent_sat_rates) if len(recent_sat_rates) > 0 else 0.0
-            avg_act_std = np.mean(recent_act_stds) if len(recent_act_stds) > 0 else 0.0
+            avg_reward = current_avg_reward
+            success_rate = current_success_rate
+            avg_sat = current_sat_rate
+            avg_act_std = current_act_std
             
             # Use actual sigma for continuous agents (MARDPG/MADDPG)
             current_sigma = agent.noise[0].sigma if hasattr(agent, 'noise') else 0.0
