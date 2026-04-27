@@ -35,7 +35,7 @@ def main():
         scenario=args.scenario
     )
     
-    obs_dim = env.observation_space.shape[1]
+    obs_dim = config['environment'].get('obs_dim', 34)
     
     if args.agent in ['mardpg', 'iddpg']:
         agent = MARDPG(
