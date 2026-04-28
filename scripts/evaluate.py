@@ -111,9 +111,6 @@ def main():
                     'obstacles': env.obstacles.copy()
                 })
                 
-            if args.render:
-                env.render()
-                
             if info.get('success', False):
                 successes += 1
                 agent_success_counts += 1 # Assuming all agents reached goal for success
@@ -172,6 +169,10 @@ def main():
     
     # --- ACADEMIC PLOTTING (Fig 4 Style) ---
     print("\nGenerating Navigation Trajectory Plots...")
+    if not all_trajectories:
+        print("No complete trajectories to plot.")
+        return
+
     plt.figure(figsize=(12, 12))
     plt.style.use('seaborn-v0_8-whitegrid')
     
@@ -201,6 +202,9 @@ def main():
         plt.plot(path[:, 0], path[:, 1], color=colors[i % len(colors)], label=f'UAV {i+1}', linewidth=2.5)
         plt.scatter(path[0, 0], path[0, 1], color='red', marker='o', s=100, label='Start' if i==0 else "")
         plt.scatter(ep_data['goals'][i][0], ep_data['goals'][i][1], color='green', marker='*', s=250, label='Goal' if i==0 else "")
+        # Draw the target radius around the goal
+        goal_circle = plt.Circle((ep_data['goals'][i][0], ep_data['goals'][i][1]), env.goal_dist, color='green', alpha=0.2, linestyle='--')
+        plt.gca().add_patch(goal_circle)
 
     plt.xlim(0, env.arena_size[0])
     plt.ylim(0, env.arena_size[1])
@@ -211,8 +215,29 @@ def main():
     plt.grid(True, linestyle=':', alpha=0.6)
     
     output_path = os.path.join(config['logging']['log_dir'], 'evaluation_trajectories.png')
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     plt.savefig(output_path, dpi=300)
     print(f"Trajectory plot saved to {output_path}")
+    plt.close() # Close trajectory plot
+
+    # Metrics Bar Chart
+    plt.figure(figsize=(10, 6))
+    metrics = ['Success (%)', 'Collision (%)', 'Path Efficiency (%)', 'Fairness Index (*100)']
+    values = [success_rate, collision_rate, avg_efficiency * 100, fairness_index * 100]
+    colors_bar = ['#27ae60', '#c0392b', '#2980b9', '#8e44ad']
+    
+    bars = plt.bar(metrics, values, color=colors_bar)
+    plt.title('Evaluation Metrics Summary', fontsize=16, fontweight='bold')
+    plt.ylim(0, 110)
+    for bar in bars:
+        yval = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width()/2, yval + 2, f'{yval:.1f}', ha='center', va='bottom', fontweight='bold')
+    
+    metrics_path = os.path.join(config['logging']['log_dir'], 'evaluation_metrics.png')
+    plt.savefig(metrics_path, dpi=300)
+    print(f"Metrics plot saved to {metrics_path}")
+    
+    plt.show()
     
     env.close()
 

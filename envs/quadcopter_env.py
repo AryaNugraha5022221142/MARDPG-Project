@@ -15,10 +15,16 @@ class QuadcopterEnv:
         self.fig = None
         self.ax = None
         
-        # Load scenario config if provided and no explicit config
-        if scenario is not None and config is None:
+        # Load scenario config if provided
+        if scenario is not None:
             from .scenarios import get_scenario_config
-            config = get_scenario_config(scenario)
+            scenario_config = get_scenario_config(scenario)
+            if config is None:
+                config = scenario_config
+            else:
+                # Merge scenario specific keys into config
+                for k, v in scenario_config.items():
+                    config[k] = v
             
         if config is None:
             config = {
@@ -561,6 +567,7 @@ class QuadcopterEnv:
         self.ax.set_xlim(0, self.arena_size[0])
         self.ax.set_ylim(0, self.arena_size[1])
         self.ax.set_zlim(0, self.arena_size[2])
+        self.ax.set_box_aspect((self.arena_size[0], self.arena_size[1], self.arena_size[2]))
         self.ax.set_xlabel('X (m)')
         self.ax.set_ylabel('Y (m)')
         self.ax.set_zlabel('Z (m)')

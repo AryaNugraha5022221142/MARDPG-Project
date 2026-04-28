@@ -36,6 +36,14 @@ def main():
     print("Close the plot window to exit.")
     
     # Keep the plot open
+    import os
+    os.makedirs('logs', exist_ok=True)
+    if args.scenario:
+        save_path = f"logs/scenario_{args.scenario}_render.png"
+    else:
+        save_path = f"logs/level_{args.level}_render.png"
+    plt.savefig(save_path, dpi=300)
+    print(f"Render saved to {save_path}")
     plt.show()
 
 if __name__ == '__main__':
