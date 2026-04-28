@@ -18,7 +18,8 @@ def main():
         config = yaml.safe_load(f)
         
     # Initialize the environment in human render mode
-    env = QuadcopterEnv(config['environment'], render_mode='human', scenario=args.scenario)
+    num_agents = config.get('training', {}).get('num_agents', 3)
+    env = QuadcopterEnv(num_agents=num_agents, config=config['environment'], render_mode='human', scenario=args.scenario)
     
     # Force curriculum level
     if args.level is not None:
