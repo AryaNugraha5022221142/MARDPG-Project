@@ -19,6 +19,7 @@ def main():
     parser.add_argument('--checkpoint', type=str, required=True)
     parser.add_argument('--agent', type=str, default='mardpg', choices=['mardpg', 'maddpg', 'iddpg'], help='Agent type to evaluate')
     parser.add_argument('--scenario', type=str, default=None, help='Scenario name')
+    parser.add_argument('--level', type=int, default=None, help='Curriculum level to evaluate on (0-4)')
     parser.add_argument('--episodes', type=int, default=100)
     parser.add_argument('--render', action='store_true', help='Enable 3D visualization')
     args = parser.parse_args()
@@ -35,6 +36,10 @@ def main():
         scenario=args.scenario
     )
     
+    if args.level is not None:
+        env.set_curriculum_level(args.level)
+        print(f"Evaluating on Curriculum Level {args.level}")
+        
     obs_dim = config['environment'].get('obs_dim', 34)
     
     if args.agent in ['mardpg', 'iddpg']:

@@ -174,6 +174,7 @@ class QuadcopterEnv:
             np.random.seed(seed)
             
         self.step_count = 0
+        self._episode_collision = False
         self.agent_dones = np.zeros(self.num_agents, dtype=bool)
         self._generate_obstacles()
         
@@ -460,7 +461,7 @@ class QuadcopterEnv:
             
         obs = self._get_observations()
         rewards = np.zeros(self.num_agents, dtype=np.float32)
-        info = {'success': False, 'collision': False}
+        info = {'success': False, 'collision': getattr(self, '_episode_collision', False)}
         info['agent_terminated_now'] = np.zeros(self.num_agents, dtype=bool)
         
         sat_rates = [1.0 if getattr(self.agents[i], 'is_saturated', False) else 0.0 for i in range(self.num_agents)]
@@ -508,6 +509,7 @@ class QuadcopterEnv:
             # Collision check
             if not self.agent_dones[i] and d_min < self.collision_dist:
                 self.agent_dones[i] = True
+                self._episode_collision = True
                 info['agent_terminated_now'][i] = True
                 info['collision'] = True
                 penalty = self.reward_config.get('collision_penalty', -20.0)
