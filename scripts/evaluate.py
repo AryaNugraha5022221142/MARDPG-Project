@@ -77,59 +77,66 @@ def main():
     # Trajectory storage for plotting (first 5 episodes)
     all_trajectories = []
     
-    for ep in range(args.episodes):
-        obs, _ = env.reset()
-        if args.agent == 'mardpg':
-            actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
-            critic_hidden = [agent.critics[i].init_hidden(1, device) for i in range(env.num_agents)]
-        
-        done = False
-        steps = 0
-        ep_trajectories = [[] for _ in range(env.num_agents)]
-        
-        while not done:
+    try:
+        for ep in range(args.episodes):
+            obs, _ = env.reset()
+            if args.agent == 'mardpg':
+                actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
+                critic_hidden = [agent.critics[i].init_hidden(1, device) for i in range(env.num_agents)]
+            
+            done = False
+            steps = 0
+            ep_trajectories = [[] for _ in range(env.num_agents)]
+            
+            while not done:
+                if args.render:
+                    env.render()
+                
+                for i in range(env.num_agents):
+                    ep_trajectories[i].append(env.agents[i].state[:3].copy())
+                    
+                if args.agent in ['mardpg', 'iddpg']:
+                    actions, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden, explore=False)
+                else:
+                    actions = agent.select_actions(obs, explore=False)
+                    
+                obs, rewards, terminated, truncated, info = env.step(actions)
+                done = terminated or truncated
+                steps += 1
+                
+            if ep < 5: # Save first 5 episodes for plotting
+                all_trajectories.append({
+                    'paths': ep_trajectories,
+                    'goals': env.goals.copy(),
+                    'obstacles': env.obstacles.copy()
+                })
+                
             if args.render:
                 env.render()
+                
+            if info.get('success', False):
+                successes += 1
+                agent_success_counts += 1 # Assuming all agents reached goal for success
+                times_to_goal.append(steps)
+            elif info.get('collision', False):
+                collisions += 1
+                
+            # Collect EE Metrics
+            all_jerks.append(np.mean(env.total_jerk))
+            all_safety_frontiers.append(np.mean(env.safety_frontier))
             
+            # Path Efficiency
             for i in range(env.num_agents):
-                ep_trajectories[i].append(env.agents[i].state[:3].copy())
+                path_lengths.append(np.sum(np.linalg.norm(np.diff(np.array(ep_trajectories[i]), axis=0), axis=1)))
+                # Ideal distance from start to goal
+                ideal_lengths.append(np.linalg.norm(env.goals[i] - ep_trajectories[i][0]))
                 
-            if args.agent in ['mardpg', 'iddpg']:
-                actions, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden, explore=False)
-            else:
-                actions = agent.select_actions(obs, explore=False)
-                
-            obs, rewards, terminated, truncated, info = env.step(actions)
-            done = terminated or truncated
-            steps += 1
+            print(f"Episode {ep+1}/{args.episodes} - Steps: {steps}, Success: {info.get('success', False)}, Collision: {info.get('collision', False)}")
             
-        if ep < 5: # Save first 5 episodes for plotting
-            all_trajectories.append({
-                'paths': ep_trajectories,
-                'goals': env.goals.copy(),
-                'obstacles': env.obstacles.copy()
-            })
-            
-        if args.render:
-            env.render()
-            
-        if info.get('success', False):
-            successes += 1
-            agent_success_counts += 1 # Assuming all agents reached goal for success
-            times_to_goal.append(steps)
-        elif info.get('collision', False):
-            collisions += 1
-            
-        # Collect EE Metrics
-        all_jerks.append(np.mean(env.total_jerk))
-        all_safety_frontiers.append(np.mean(env.safety_frontier))
+    except KeyboardInterrupt:
+        print("\nEvaluation interrupted by user! Generating plots from collected data...")
+        args.episodes = max(1, len(all_jerks)) # Avoid div by zero
         
-        # Path Efficiency
-        for i in range(env.num_agents):
-            path_lengths.append(np.sum(np.linalg.norm(np.diff(np.array(ep_trajectories[i]), axis=0), axis=1)))
-            # Ideal distance from start to goal
-            ideal_lengths.append(np.linalg.norm(env.goals[i] - ep_trajectories[i][0]))
-            
     success_rate = successes / args.episodes * 100
     collision_rate = collisions / args.episodes * 100
     trapped_rate = 100 - success_rate - collision_rate
