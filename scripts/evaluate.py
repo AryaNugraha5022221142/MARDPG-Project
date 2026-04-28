@@ -169,56 +169,58 @@ def main():
     
     # --- ACADEMIC PLOTTING (Fig 4 Style) ---
     print("\nGenerating Navigation Trajectory Plots...")
-    if not all_trajectories:
-        print("No complete trajectories to plot.")
-        return
-
-    plt.figure(figsize=(12, 12))
-    plt.style.use('seaborn-v0_8-whitegrid')
     
-    # Plot the first successful episode's trajectory
-    plot_ep = 0
-    for i, ep_data in enumerate(all_trajectories):
-        # Prefer plotting a success if available
-        plot_ep = i
-        break 
+    if all_trajectories:
+        plt.figure(figsize=(12, 12))
+        plt.style.use('seaborn-v0_8-whitegrid')
+        
+        # Plot the first successful episode's trajectory
+        plot_ep = 0
+        for i, ep_data in enumerate(all_trajectories):
+            # Prefer plotting a success if available
+            plot_ep = i
+            break 
 
-    ep_data = all_trajectories[plot_ep]
-    
-    # Plot Obstacles
-    for obs_item in ep_data['obstacles']:
-        if obs_item['type'] == 'box':
-            rect = plt.Rectangle((obs_item['pos'][0]-obs_item['size'][0]/2, obs_item['pos'][1]-obs_item['size'][1]/2), 
-                                 obs_item['size'][0], obs_item['size'][1], color='gray', alpha=0.4)
-            plt.gca().add_patch(rect)
-        else:
-            circle = plt.Circle((obs_item['pos'][0], obs_item['pos'][1]), obs_item['radius'], color='gray', alpha=0.4)
-            plt.gca().add_patch(circle)
+        ep_data = all_trajectories[plot_ep]
+        
+        # Plot Obstacles
+        for obs_item in ep_data['obstacles']:
+            if obs_item['type'] == 'box':
+                rect = plt.Rectangle((obs_item['pos'][0]-obs_item['size'][0]/2, obs_item['pos'][1]-obs_item['size'][1]/2), 
+                                     obs_item['size'][0], obs_item['size'][1], color='gray', alpha=0.4)
+                plt.gca().add_patch(rect)
+            else:
+                circle = plt.Circle((obs_item['pos'][0], obs_item['pos'][1]), obs_item['radius'], color='gray', alpha=0.4)
+                plt.gca().add_patch(circle)
+                
+        # Plot Paths
+        colors = ['#c0392b', '#2980b9', '#27ae60', '#f39c12', '#8e44ad']
+        for i in range(env.num_agents):
+            path = np.array(ep_data['paths'][i])
+            if len(path) > 0:
+                plt.plot(path[:, 0], path[:, 1], color=colors[i % len(colors)], label=f'UAV {i+1}', linewidth=2.5)
+                plt.scatter(path[0, 0], path[0, 1], color='red', marker='o', s=100, label='Start' if i==0 else "")
             
-    # Plot Paths
-    colors = ['#c0392b', '#2980b9', '#27ae60', '#f39c12', '#8e44ad']
-    for i in range(env.num_agents):
-        path = np.array(ep_data['paths'][i])
-        plt.plot(path[:, 0], path[:, 1], color=colors[i % len(colors)], label=f'UAV {i+1}', linewidth=2.5)
-        plt.scatter(path[0, 0], path[0, 1], color='red', marker='o', s=100, label='Start' if i==0 else "")
-        plt.scatter(ep_data['goals'][i][0], ep_data['goals'][i][1], color='green', marker='*', s=250, label='Goal' if i==0 else "")
-        # Draw the target radius around the goal
-        goal_circle = plt.Circle((ep_data['goals'][i][0], ep_data['goals'][i][1]), env.goal_dist, color='green', alpha=0.2, linestyle='--')
-        plt.gca().add_patch(goal_circle)
+            plt.scatter(ep_data['goals'][i][0], ep_data['goals'][i][1], color='green', marker='*', s=250, label='Goal' if i==0 else "")
+            # Draw the target radius around the goal
+            goal_circle = plt.Circle((ep_data['goals'][i][0], ep_data['goals'][i][1]), env.goal_dist, color='green', alpha=0.2, linestyle='--')
+            plt.gca().add_patch(goal_circle)
 
-    plt.xlim(0, env.arena_size[0])
-    plt.ylim(0, env.arena_size[1])
-    plt.title(f'Navigation Trajectories (MARDPG) - Evaluation Episode', fontsize=16, fontweight='bold')
-    plt.xlabel('X (m)', fontsize=14)
-    plt.ylabel('Y (m)', fontsize=14)
-    plt.legend(loc='upper right')
-    plt.grid(True, linestyle=':', alpha=0.6)
-    
-    output_path = os.path.join(config['logging']['log_dir'], 'evaluation_trajectories.png')
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    plt.savefig(output_path, dpi=300)
-    print(f"Trajectory plot saved to {output_path}")
-    plt.close() # Close trajectory plot
+        plt.xlim(0, env.arena_size[0])
+        plt.ylim(0, env.arena_size[1])
+        plt.title(f'Navigation Trajectories ({args.agent.upper()}) - Evaluation Episode', fontsize=16, fontweight='bold')
+        plt.xlabel('X (m)', fontsize=14)
+        plt.ylabel('Y (m)', fontsize=14)
+        plt.legend(loc='upper right')
+        plt.grid(True, linestyle=':', alpha=0.6)
+        
+        output_path = os.path.join(config['logging']['log_dir'], 'evaluation_trajectories.png')
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        plt.savefig(output_path, dpi=300)
+        print(f"Trajectory plot saved to {output_path}")
+        plt.close() # Close trajectory plot
+    else:
+        print("No complete trajectories to plot. Skipping trajectory chart.")
 
     # Metrics Bar Chart
     plt.figure(figsize=(10, 6))

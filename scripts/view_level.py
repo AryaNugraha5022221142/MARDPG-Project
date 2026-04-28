@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 def main():
     parser = argparse.ArgumentParser(description="View Curriculum Levels for Screenshots")
     parser.add_argument('--config', type=str, default='config/config.yaml')
-    parser.add_argument('--level', type=int, default=0, help='Curriculum level (0-4)')
+    parser.add_argument('--level', type=int, default=None, help='Curriculum level (0-4)')
     parser.add_argument('--scenario', type=str, default=None, help='Specific scenario to render')
     args = parser.parse_args()
 

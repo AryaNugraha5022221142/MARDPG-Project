@@ -171,6 +171,7 @@ class QuadcopterEnv:
             self.dynamic_ratio = min(0.1 + (level - 2) * 0.1, 0.5)
             
         self.arena_diagonal = float(np.linalg.norm(self.arena_size))
+        print(f"[DEBUG] quadcopter_env initialized with arena_size: {self.arena_size}, scenario: {self.scenario}")
         self._generate_obstacles()
         print(f"Curriculum Level Updated: {level} (Arena: {self.arena_size}, Obstacles: {self.num_obstacles}, Dynamic: {self.dynamic_ratio:.1f})")
 
@@ -568,6 +569,12 @@ class QuadcopterEnv:
         self.ax.set_ylim(0, self.arena_size[1])
         self.ax.set_zlim(0, self.arena_size[2])
         self.ax.set_box_aspect((self.arena_size[0], self.arena_size[1], self.arena_size[2]))
+        
+        # Plot ground plane to anchor visual
+        xx, yy = np.meshgrid([0, self.arena_size[0]], [0, self.arena_size[1]])
+        zz = np.zeros_like(xx)
+        self.ax.plot_surface(xx, yy, zz, color='green', alpha=0.1)
+
         self.ax.set_xlabel('X (m)')
         self.ax.set_ylabel('Y (m)')
         self.ax.set_zlabel('Z (m)')
