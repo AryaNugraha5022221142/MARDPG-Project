@@ -443,7 +443,7 @@ class QuadcopterEnv:
             if np.any(delta > self.rate_limit_per_step):
                 action = self.prev_actions[i] + np.clip(action - self.prev_actions[i], -self.rate_limit_per_step, self.rate_limit_per_step)
             
-            r_smooth_arr[i] = -self.reward_config['weights'].get('smoothness', 0.01) * np.sum((action - self.prev_actions[i])**2)
+            r_smooth_arr[i] = -self.reward_config.get('weights', {}).get('smoothness', 0.01) * np.sum((action - self.prev_actions[i])**2)
             self.prev_actions[i] = action.copy()
             
             # Network already outputs in [-3.5, 3.5]; do NOT rescale again.
