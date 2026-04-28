@@ -36,7 +36,7 @@ def main():
         scenario=args.scenario
     )
     
-    if args.level is not None:
+    if args.level is not None and args.scenario is None:
         env.set_curriculum_level(args.level)
         print(f"Evaluating on Curriculum Level {args.level}")
         
@@ -110,6 +110,9 @@ def main():
                     'goals': env.goals.copy(),
                     'obstacles': env.obstacles.copy()
                 })
+                
+            if args.render:
+                env.render()
                 
             if info.get('success', False):
                 successes += 1

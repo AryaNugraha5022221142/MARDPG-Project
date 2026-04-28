@@ -21,8 +21,8 @@ def main():
     num_agents = config.get('training', {}).get('num_agents', 3)
     env = QuadcopterEnv(num_agents=num_agents, config=config['environment'], render_mode='human', scenario=args.scenario)
     
-    # Force curriculum level
-    if args.level is not None:
+    # Force curriculum level (only if not a scenario)
+    if args.level is not None and args.scenario is None:
         env.set_curriculum_level(args.level)
         
     obs, _ = env.reset()
