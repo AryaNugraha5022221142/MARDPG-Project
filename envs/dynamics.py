@@ -35,7 +35,7 @@ class QuadcopterDynamics:
                 
                 if abs(u_j) > 5.0:
                     self.is_saturated = True
-                u_j = np.clip(u_j, -5.0, 5.0)  # Actuator saturation Eq. 3.74
+                u_j = 5.0 * np.tanh(u_j / 5.0)  # Actuator saturation Eq. 3.74
                 
                 # Apply u_j to plant dynamics (ZOH update, Eq. 3.16)
                 alpha = np.exp(-self.dt / self.tau)
@@ -52,8 +52,9 @@ class QuadcopterDynamics:
         a_x = (velocity_ref[0] - self.state[6]) / self.tau
         a_y = (velocity_ref[1] - self.state[7]) / self.tau
         
-        phi_new = np.clip(np.arctan2(a_y, 9.81), -np.deg2rad(20), np.deg2rad(20))
-        theta_new = np.clip(np.arctan2(-a_x, 9.81), -np.deg2rad(20), np.deg2rad(20))
+        phi_limit = np.deg2rad(20)
+        phi_new = phi_limit * np.tanh(np.arctan2(a_y, 9.81) / phi_limit)
+        theta_new = phi_limit * np.tanh(np.arctan2(-a_x, 9.81) / phi_limit)
         
         self.state[3] = phi_new
         self.state[4] = theta_new
@@ -78,7 +79,7 @@ class QuadcopterDynamics:
         for j in range(3):
             if abs(v_cmd[j]) > 5.0:
                 self.is_saturated = True
-            u_j = np.clip(v_cmd[j], -5.0, 5.0)
+            u_j = 5.0 * np.tanh(v_cmd[j] / 5.0)
             self.state[6+j] = alpha * self.state[6+j] + (1 - alpha) * u_j
             self.state[j] += self.state[6+j] * self.dt
         
@@ -91,8 +92,9 @@ class QuadcopterDynamics:
         # Roll and pitch estimation
         a_x = (v_cmd[0] - self.state[6]) / self.tau
         a_y = (v_cmd[1] - self.state[7]) / self.tau
-        phi_new = np.clip(np.arctan2(a_y, 9.81), -np.deg2rad(20), np.deg2rad(20))
-        theta_new = np.clip(np.arctan2(-a_x, 9.81), -np.deg2rad(20), np.deg2rad(20))
+        phi_limit = np.deg2rad(20)
+        phi_new = phi_limit * np.tanh(np.arctan2(a_y, 9.81) / phi_limit)
+        theta_new = phi_limit * np.tanh(np.arctan2(-a_x, 9.81) / phi_limit)
         
         # Update state
         self.state[3] = phi_new

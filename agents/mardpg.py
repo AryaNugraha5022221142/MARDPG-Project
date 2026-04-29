@@ -156,7 +156,7 @@ class MARDPG:
         obs = torch.FloatTensor(obs_seq).to(self.device)
         actions = torch.FloatTensor(act_seq).to(self.device)
         rewards = torch.FloatTensor(rew_seq).to(self.device)
-        # rewards = torch.clamp(rewards, -5.0, 10.0)
+        rewards = torch.clamp(rewards, -150.0, 150.0)
         next_obs = torch.FloatTensor(nobs_seq).to(self.device)
         dones = torch.FloatTensor(done_seq).to(self.device)
         masks = torch.FloatTensor(mask_seq).to(self.device).squeeze(-1) # (batch, seq)
