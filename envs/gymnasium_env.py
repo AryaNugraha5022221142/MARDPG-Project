@@ -49,8 +49,8 @@ class MultiUAVGymEnv(gym.Env):
             scenario=scenario,
         )
 
-        # Obs dim per agent: 25 (rangefinder) + 5 (goal) + 3 (vel) = 33
-        self.obs_dim_per_agent = 33
+        # Obs dim per agent: 25 (rangefinder) + 5 (goal) + 3 (vel) + 1 (is_sat) + 4 (prev_act) = 38
+        self.obs_dim_per_agent = 38
         total_obs_dim = self.obs_dim_per_agent * num_agents
 
         # Single-agent interface: all agents' observations concatenated

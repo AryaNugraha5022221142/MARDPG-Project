@@ -161,7 +161,7 @@ class MARDPG:
         dones = torch.FloatTensor(done_seq).to(self.device)
         masks = torch.FloatTensor(mask_seq).to(self.device).squeeze(-1) # (batch, seq)
         
-        burn_in = min(8, self.seq_len // 2)
+        burn_in = self.seq_len // 2
         masks[:, :burn_in] = 0.0 # Set burn_in steps to 0
         
         actor_hidden = [self.actor.init_hidden(self.batch_size, self.device) for _ in range(self.num_agents)]

@@ -373,7 +373,8 @@ class QuadcopterEnv:
                 ranges_norm, 
                 [dist_norm, np.sin(theta_goal), np.cos(theta_goal), np.sin(phi_goal), np.cos(phi_goal)],
                 vel_norm,
-                [is_saturated]
+                [is_saturated],
+                self.prev_actions[i] / 3.5
             ])
             obs_all.append(obs)
             

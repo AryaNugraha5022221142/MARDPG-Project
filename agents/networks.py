@@ -9,7 +9,7 @@ class ActorLSTM(nn.Module):
     LSTM-based Actor network shared across all agents.
     Outputs continuous actions in [-3.5, 3.5].
     """
-    def __init__(self, input_dim: int = 33, hidden_dim: int = 128, num_layers: int = 1, output_dim: int = 4, dropout: float = 0.1, num_agents: int = 3):
+    def __init__(self, input_dim: int = 38, hidden_dim: int = 128, num_layers: int = 1, output_dim: int = 4, dropout: float = 0.1, num_agents: int = 3):
         super(ActorLSTM, self).__init__()
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
@@ -107,7 +107,7 @@ class Actor(nn.Module):
     Standard MLP-based Actor network shared across all agents.
     Outputs continuous actions in [-1, 1].
     """
-    def __init__(self, input_dim: int = 33, hidden_dim: int = 256, output_dim: int = 4, dropout: float = 0.2, num_agents: int = 3):
+    def __init__(self, input_dim: int = 38, hidden_dim: int = 256, output_dim: int = 4, dropout: float = 0.2, num_agents: int = 3):
         super(Actor, self).__init__()
         self.num_agents = num_agents
         
@@ -134,7 +134,7 @@ class Critic(nn.Module):
     """
     Centralized Critic network for a single agent.
     """
-    def __init__(self, obs_dim: int = 33, action_dim: int = 4, num_agents: int = 3, dropout: float = 0.2):
+    def __init__(self, obs_dim: int = 38, action_dim: int = 4, num_agents: int = 3, dropout: float = 0.2):
         super(Critic, self).__init__()
         
         input_dim = (obs_dim * num_agents) + (action_dim * num_agents)
