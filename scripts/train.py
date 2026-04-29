@@ -125,7 +125,7 @@ def main():
             obs, _ = env.reset()
             if args.agent == 'mardpg':
                 actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
-                critic_hidden = [agent.critics[i].init_hidden(1, device) for i in range(env.num_agents)]
+                critic_hidden = [agent.critics_1[i].init_hidden(1, device) for i in range(env.num_agents)]
             
             episode_reward = 0
             done = False
