@@ -117,7 +117,7 @@ class MARDPG:
                     action += self.noise[i].sample()
                     self.noise[i].step() # anneal after each call
                 
-                action = np.clip(action, -1.0, 1.0)
+                action = np.clip(action, -3.5, 3.5)
                 actions.append(action)
                 
                 # Store hidden state for critic
@@ -156,7 +156,7 @@ class MARDPG:
         obs = torch.FloatTensor(obs_seq).to(self.device)
         actions = torch.FloatTensor(act_seq).to(self.device)
         rewards = torch.FloatTensor(rew_seq).to(self.device)
-        rewards = torch.clamp(rewards, -5.0, 10.0)
+        # rewards = torch.clamp(rewards, -5.0, 10.0)
         next_obs = torch.FloatTensor(nobs_seq).to(self.device)
         dones = torch.FloatTensor(done_seq).to(self.device)
         masks = torch.FloatTensor(mask_seq).to(self.device).squeeze(-1) # (batch, seq)
