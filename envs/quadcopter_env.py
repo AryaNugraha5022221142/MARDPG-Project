@@ -360,7 +360,11 @@ class QuadcopterEnv:
             theta_goal = np.arctan2(rel_pos[1], rel_pos[0]) - yaw
             phi_goal = np.arctan2(rel_pos[2], np.sqrt(rel_pos[0]**2 + rel_pos[1]**2))
             
-            vel_norm = np.clip(self.agents[i].state[6:9] / 5.0, -1.0, 1.0)
+            cos_y, sin_y = np.cos(yaw), np.sin(yaw)
+            vx_body = state[6] * cos_y + state[7] * sin_y
+            vy_body = -state[6] * sin_y + state[7] * cos_y
+            vz_body = state[8]
+            vel_norm = np.clip(np.array([vx_body, vy_body, vz_body]) / 5.0, -1.0, 1.0)
             
             # Saturation indicator (Bug 14)
             is_saturated = float(getattr(self.agents[i], 'is_saturated', False))

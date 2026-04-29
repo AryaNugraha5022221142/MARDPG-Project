@@ -92,7 +92,7 @@ class MADDPG:
                     action += self.noise[i].sample()
                     self.noise[i].step()
                 
-                action = np.clip(action, -1.0, 1.0)
+                action = np.clip(action, -3.5, 3.5)
                 
                 actions.append(action)
                 
