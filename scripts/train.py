@@ -175,7 +175,7 @@ def main():
                 done = terminated or truncated
                 global_step_count += 1
                 
-                if args.agent == 'mardpg':
+                if args.agent in ['mardpg', 'iddpg', 'martd3', 'mardpg_g']:
                     agent.memory.push(obs, np.array(actions), rewards, next_obs, dones, done)
                 else:
                     agent.memory.push(obs, np.array(actions), rewards, next_obs, dones)
