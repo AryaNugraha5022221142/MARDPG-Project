@@ -9,30 +9,21 @@ import copy
 from .networks import Actor, Critic
 from .replay_buffer import ReplayBuffer
 
-class OUNoise:
+class AdaptiveGaussianNoise:
     """
-    Ornstein-Uhlenbeck process for temporally correlated exploration.
+    Gaussian Noise for continuous action exploration with annealing.
     """
-    def __init__(self, action_dim: int, mu: float = 0.0, theta: float = 0.15, sigma_start: float = 1.2, sigma_end: float = 0.15, total_steps: int = 3_000_000):
-        self.action_dim = action_dim
-        self.mu = mu * np.ones(self.action_dim)
-        self.theta = theta
+    def __init__(self, action_dim, sigma_start=0.5, sigma_end=0.05, total_steps=500000):
         self.sigma = sigma_start
         self.sigma_end = sigma_end
         self.decay = (sigma_start - sigma_end) / total_steps
-        self.state = np.copy(self.mu)
+        self.action_dim = action_dim
 
-    def sample(self) -> np.ndarray:
-        x = self.state
-        dx = self.theta * (self.mu - x) + self.sigma * np.random.randn(self.action_dim)
-        self.state = x + dx
-        return self.state
+    def sample(self):
+        return np.random.normal(0, self.sigma, self.action_dim)
         
     def step(self):
         self.sigma = max(self.sigma_end, self.sigma - self.decay)
-        
-    def reset(self):
-        self.state = np.copy(self.mu)
 
 class MADDPG:
     """
@@ -71,7 +62,7 @@ class MADDPG:
         self.critics_target = copy.deepcopy(self.critics)
         
         # Noise
-        self.noise = [OUNoise(action_dim) for _ in range(num_agents)]
+        self.noise = [AdaptiveGaussianNoise(action_dim) for _ in range(num_agents)]
         
         # Optimizers
         actor_lr = config['learning'].get('actor_lr', 1e-4)

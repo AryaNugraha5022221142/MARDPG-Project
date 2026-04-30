@@ -15,13 +15,13 @@ from tqdm import tqdm
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from envs import QuadcopterEnv
-from agents import MARDPG, MADDPG
+from agents import MARDPG, MADDPG, MARTD3, MARDPG_Gaussian
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='config/config.yaml', help='Path to config file')
     parser.add_argument('--run-name', type=str, default='mardpg_run', help='Name of the run')
-    parser.add_argument('--agent', type=str, default='mardpg', choices=['mardpg', 'maddpg', 'iddpg'], help='Agent type to train')
+    parser.add_argument('--agent', type=str, default='mardpg', choices=['mardpg', 'maddpg', 'iddpg', 'martd3', 'mardpg_g'], help='Agent type to train')
     parser.add_argument('--scenario', type=str, default=None, help='Scenario name (e.g., urban_canyon, search_and_rescue)')
     parser.add_argument('--num-episodes', type=int, default=None, help='Number of episodes to train')
     parser.add_argument('--seed', type=int, default=None, help='Random seed')
@@ -74,6 +74,24 @@ def main():
             device=device,
             independent_critics=(args.agent == 'iddpg')
         )
+    elif args.agent == 'martd3':
+        agent = MARTD3(
+            obs_dim=obs_dim, 
+            action_dim=4, 
+            num_agents=config['training']['num_agents'], 
+            config=config, 
+            device=device,
+            independent_critics=False
+        )
+    elif args.agent == 'mardpg_g':
+        agent = MARDPG_Gaussian(
+            obs_dim=obs_dim, 
+            action_dim=4, 
+            num_agents=config['training']['num_agents'], 
+            config=config, 
+            device=device,
+            independent_critics=False
+        )
     else:
         agent = MADDPG(
             obs_dim=obs_dim, 
@@ -123,7 +141,10 @@ def main():
     try:
         for episode in pbar:
             obs, _ = env.reset()
-            if args.agent == 'mardpg':
+            if args.agent in ['mardpg', 'iddpg', 'mardpg_g']:
+                actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
+                critic_hidden = [agent.critics[i].init_hidden(1, device) for i in range(env.num_agents)]
+            elif args.agent == 'martd3':
                 actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
                 critic_hidden = [agent.critics_1[i].init_hidden(1, device) for i in range(env.num_agents)]
             
@@ -136,7 +157,7 @@ def main():
                 if args.render:
                     env.render()
                     
-                if args.agent == 'mardpg':
+                if args.agent in ['mardpg', 'iddpg', 'martd3', 'mardpg_g']:
                     actions, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden)
                 else:
                     actions = agent.select_actions(obs)
