@@ -63,6 +63,7 @@ class QuadcopterEnv:
         self.agent_dones = np.zeros(self.num_agents, dtype=bool)
         self.prev_actions = np.zeros((self.num_agents, 4), dtype=np.float32)
         self.prev_ranges_norm = np.zeros((self.num_agents, 25), dtype=np.float32)
+        self.prev_sensor_noise = np.zeros((self.num_agents, 25), dtype=np.float32)
         
         # Ablation options
         self.sensor_noise_std = config.get('sensor_noise_std', 0.02) # 2% default
@@ -208,6 +209,7 @@ class QuadcopterEnv:
         self.prev_vel = np.zeros((self.num_agents, 3), dtype=np.float32)
         self.prev_actions = np.zeros((self.num_agents, 4), dtype=np.float32)
         self.prev_ranges_norm = np.zeros((self.num_agents, 25), dtype=np.float32)
+        self.prev_sensor_noise = np.zeros((self.num_agents, 25), dtype=np.float32)
         
         # Random start positions on the "left" side
         for i in range(self.num_agents):
@@ -350,9 +352,13 @@ class QuadcopterEnv:
                 tn = -pos[dim] / (dir_vecs[:, dim] - 1e-8)
                 ranges = np.where(mask_n & (tn < ranges), tn, ranges)
             
-            # Apply noise and clip
-            sensor_noise = np.random.normal(0, self.sensor_noise_std * self.max_range, 25)
-            ranges = np.clip(ranges + sensor_noise, 0, self.max_range)
+            # Apply AR(1) temporally correlated noise
+            rho = 0.85
+            eta = np.random.normal(0, self.sensor_noise_std * self.max_range, 25)
+            epsilon = rho * self.prev_sensor_noise[i] + eta
+            self.prev_sensor_noise[i] = epsilon
+            
+            ranges = np.clip(ranges + epsilon, 0, self.max_range)
             ranges_norm = ranges / self.max_range
             
             # Goal info

@@ -67,8 +67,8 @@ class MARDPG:
         # Set total steps to a reasonable estimate: e.g. 600 max steps/ep * 5000 episodes = 3,000,000 steps.
         # This allows exploration to organically decay properly over the full 5000 episodes.
         self.noise = [AdaptiveGaussianNoise(action_dim,
-                                            sigma_start=1.2,
-                                            sigma_end=0.15,
+                                            sigma_start=0.5,
+                                            sigma_end=0.05,
                                             total_steps=3_000_000) for _ in range(num_agents)]
         
         # Optimizers

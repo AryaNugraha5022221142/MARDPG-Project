@@ -50,18 +50,6 @@ class QuadcopterDynamics:
             psi_new = psi + yaw_rate_cmd_rad * self.dt
             self.state[5] = (psi_new + np.pi) % (2 * np.pi) - np.pi
             
-        # Roll and pitch estimation (physically motivated from acceleration)
-        # a = (u - v) / tau. phi = arctan(a_y / g), theta = arctan(-a_x / g)
-        a_x = (velocity_ref[0] - self.state[6]) / self.tau
-        a_y = (velocity_ref[1] - self.state[7]) / self.tau
-        
-        phi_limit = np.deg2rad(20)
-        phi_new = phi_limit * np.tanh(np.arctan2(a_y, 9.81) / phi_limit)
-        theta_new = phi_limit * np.tanh(np.arctan2(-a_x, 9.81) / phi_limit)
-        
-        self.state[3] = phi_new
-        self.state[4] = theta_new
-        
         return self.state.copy()
 
     def step(self, velocity_cmd: np.ndarray):
@@ -92,16 +80,7 @@ class QuadcopterDynamics:
         # Wrap to [-pi, pi]
         psi_new = (psi_new + np.pi) % (2 * np.pi) - np.pi
         
-        # Roll and pitch estimation
-        a_x = (v_cmd[0] - self.state[6]) / self.tau
-        a_y = (v_cmd[1] - self.state[7]) / self.tau
-        phi_limit = np.deg2rad(20)
-        phi_new = phi_limit * np.tanh(np.arctan2(a_y, 9.81) / phi_limit)
-        theta_new = phi_limit * np.tanh(np.arctan2(-a_x, 9.81) / phi_limit)
-        
         # Update state
-        self.state[3] = phi_new
-        self.state[4] = theta_new
         self.state[5] = psi_new
         self.state[9:12] = 0.0  # Simplified angular velocities
         
