@@ -28,10 +28,13 @@ class QuadcopterDynamics:
         yaw_rate_cmd_rad = np.deg2rad(velocity_ref[3])
         self.is_saturated = False
         
+        # Add small process noise to velocity commands for robustness
+        v_cmd_noisy = velocity_ref[0:3] + np.random.normal(0, 0.1, size=3)
+        
         for _ in range(M):
             for j, axis in enumerate([0, 1, 2]):
                 # Pure velocity feedback LQR mapping
-                u_j = lqr.compute_velocity_input(velocity_ref[j], self.state[6+j])
+                u_j = lqr.compute_velocity_input(v_cmd_noisy[j], self.state[6+j])
                 
                 if abs(u_j) > 5.0:
                     self.is_saturated = True

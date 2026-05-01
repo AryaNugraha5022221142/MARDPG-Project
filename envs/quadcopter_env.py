@@ -62,6 +62,7 @@ class QuadcopterEnv:
         self.prev_dist_to_goal = np.zeros(self.num_agents, dtype=np.float32)
         self.agent_dones = np.zeros(self.num_agents, dtype=bool)
         self.prev_actions = np.zeros((self.num_agents, 4), dtype=np.float32)
+        self.prev_ranges_norm = np.zeros((self.num_agents, 25), dtype=np.float32)
         
         # Ablation options
         self.sensor_noise_std = config.get('sensor_noise_std', 0.02) # 2% default
@@ -206,6 +207,7 @@ class QuadcopterEnv:
         self.prev_accel = np.zeros((self.num_agents, 3), dtype=np.float32)
         self.prev_vel = np.zeros((self.num_agents, 3), dtype=np.float32)
         self.prev_actions = np.zeros((self.num_agents, 4), dtype=np.float32)
+        self.prev_ranges_norm = np.zeros((self.num_agents, 25), dtype=np.float32)
         
         # Random start positions on the "left" side
         for i in range(self.num_agents):
@@ -369,14 +371,20 @@ class QuadcopterEnv:
             # Saturation indicator (Bug 14)
             is_saturated = float(getattr(self.agents[i], 'is_saturated', False))
             
+            delta_ranges = ranges_norm - self.prev_ranges_norm[i]
+            
             obs = np.concatenate([
                 ranges_norm, 
+                delta_ranges,
                 [dist_norm, np.sin(theta_goal), np.cos(theta_goal), np.sin(phi_goal), np.cos(phi_goal)],
                 vel_norm,
                 [is_saturated],
                 self.prev_actions[i] / 3.5
             ])
             obs_all.append(obs)
+            
+            # Update prev_ranges_norm for the next step
+            self.prev_ranges_norm[i] = ranges_norm
             
         return np.array(obs_all, dtype=np.float32)
 
