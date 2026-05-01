@@ -117,6 +117,7 @@ class MADDPG:
         
         # 1. Update Critics
         critic_losses = []
+        q_value_mags = []
         with torch.no_grad():
             next_actions = []
             for i in range(self.num_agents):
@@ -136,6 +137,7 @@ class MADDPG:
             current_q = self.critics[i](obs_full, actions_full).squeeze(-1)
             critic_loss = F.mse_loss(current_q, target_q)
             critic_losses.append(critic_loss.item())
+            q_value_mags.append(current_q.abs().mean().item())
             
             self.critic_optimizers[i].zero_grad()
             critic_loss.backward()
@@ -175,7 +177,11 @@ class MADDPG:
         for i in range(self.num_agents):
             self._soft_update(self.critics[i], self.critics_target[i])
             
-        return {'actor_loss': actor_loss.item(), 'critic_loss': np.mean(critic_losses)}
+        return {
+            'actor_loss': actor_loss.item(), 
+            'critic_loss': np.mean(critic_losses),
+            'q_value_mag': np.mean(q_value_mags)
+        }
 
     def _soft_update(self, local_model, target_model):
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):

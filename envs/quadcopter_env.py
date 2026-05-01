@@ -438,10 +438,18 @@ class QuadcopterEnv:
         r_smooth_arr = np.zeros(self.num_agents, dtype=np.float32)
         
         # Apply actions only to active agents
+        tracking_errors = []
+        action_smoothness = []
+        min_distances = []
+        
         for i in range(self.num_agents):
             if self.agent_dones[i]: continue
             
             action = actions[i]
+            
+            # Action smoothness metric
+            if self.step_count > 1:
+                action_smoothness.append(np.linalg.norm(action - self.prev_actions[i]))
             
             # Rate-of-change limiting (Bug 13)
             delta = np.abs(action - self.prev_actions[i])
@@ -471,10 +479,17 @@ class QuadcopterEnv:
             self.prev_accel[i] = accel.copy()
             jerk_arr[i] = jerk_val
             
+            # Record tracking error
+            v_ref_world = world_cmd[0:3]
+            tracking_errors.append(np.linalg.norm(v_ref_world - new_vel))
+            
         obs = self._get_observations()
         rewards = np.zeros(self.num_agents, dtype=np.float32)
         info = {'success': False, 'collision': getattr(self, '_episode_collision', False)}
         info['agent_terminated_now'] = np.zeros(self.num_agents, dtype=bool)
+        
+        info['tracking_error'] = np.mean(tracking_errors) if tracking_errors else 0.0
+        info['action_smoothness'] = np.mean(action_smoothness) if action_smoothness else 0.0
         
         sat_rates = [1.0 if getattr(self.agents[i], 'is_saturated', False) else 0.0 for i in range(self.num_agents)]
         info['sat_rate'] = np.mean(sat_rates)
@@ -486,6 +501,7 @@ class QuadcopterEnv:
             goal = self.goals[i]
             dist_to_goal = np.linalg.norm(pos - goal)
             d_min = self._get_min_distance(i)
+            min_distances.append(d_min)
             
             # Action penalty
             a_t = actions[i]
@@ -533,6 +549,7 @@ class QuadcopterEnv:
             self.safety_frontier[i] = min(self.safety_frontier[i], d_min)
 
         info['agent_dones'] = self.agent_dones.copy()
+        info['min_agent_dist'] = np.mean(min_distances) if min_distances else 0.0
 
         if self.cooperative:
             team_r = np.sum(rewards) / self.num_agents
@@ -549,7 +566,7 @@ class QuadcopterEnv:
                                       if self.agent_dones[i] and 
                                       np.linalg.norm(self.agents[i].state[0:3] - self.goals[i]) < self.goal_dist)
             info['individual_success_rate'] = individual_successes / self.num_agents
-            info['success'] = (individual_successes >= 1)
+            info['success'] = (individual_successes == self.num_agents) and not getattr(self, '_episode_collision', False)
             
         truncated = self.step_count >= self.max_steps
         self.last_info = info

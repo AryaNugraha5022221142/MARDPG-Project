@@ -169,6 +169,7 @@ class MARDPG:
         
         # 1. Update Critics
         critic_losses = []
+        q_value_mags = []
         
         # Target actions
         with torch.no_grad():
@@ -194,6 +195,10 @@ class MARDPG:
             loss = F.mse_loss(current_q, target_q, reduction='none')
             critic_loss = (loss * masks).sum() / (masks.sum() + 1e-8)
             critic_losses.append(critic_loss.item())
+            
+            # Track average Q-value magnitude (applied mask)
+            q_mag = (current_q.abs() * masks).sum() / (masks.sum() + 1e-8)
+            q_value_mags.append(q_mag.item())
             
             # Optimize critic
             self.critic_optimizers[i].zero_grad()
@@ -244,7 +249,8 @@ class MARDPG:
             
         return {
             'actor_loss': actor_loss.item(),
-            'critic_loss': np.mean(critic_losses)
+            'critic_loss': np.mean(critic_losses),
+            'q_value_mag': np.mean(q_value_mags)
         }
 
     def _soft_update(self, local_model: torch.nn.Module, target_model: torch.nn.Module):
