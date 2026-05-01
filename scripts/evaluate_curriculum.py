@@ -89,7 +89,8 @@ def main():
             elif info.get('collision', False):
                 collisions += 1
                 
-            print(f"L{level} | Ep {ep+1}/{args.episodes} | Steps: {steps} | Success: {info.get('success', False)} | Collision: {info.get('collision', False)}", end='\r')
+            out_str = f"L{level} | Ep {ep+1}/{args.episodes} | Steps: {steps} | Success: {info.get('success', False)} | Collision: {info.get('collision', False)}"
+            print(f"{out_str:<80}", end='\r')
             
         sr = (successes / args.episodes) * 100
         cr = (collisions / args.episodes) * 100
