@@ -11,17 +11,19 @@ from .replay_buffer import SequenceReplayBuffer
 
 class UncorrelatedGaussianNoise:
     """
-    Pure Uncorrelated Gaussian Noise (static, no annealing).
+    Uncorrelated Gaussian Noise with annealing.
     """
-    def __init__(self, action_dim, sigma=0.15):
-        self.sigma = sigma
+    def __init__(self, action_dim, sigma_start=1.2, sigma_end=0.15, total_steps=3_000_000):
+        self.sigma = sigma_start
+        self.sigma_end = sigma_end
+        self.decay = (sigma_start - sigma_end) / total_steps
         self.action_dim = action_dim
 
     def sample(self):
         return np.random.normal(0, self.sigma, self.action_dim)
         
     def step(self):
-        pass
+        self.sigma = max(self.sigma_end, self.sigma - self.decay)
 
 class MARDPG_Gaussian:
     """
@@ -63,7 +65,7 @@ class MARDPG_Gaussian:
         self.critics_target = [copy.deepcopy(c).to(self.device) for c in self.critics]
         
         # Noise
-        self.noise = [UncorrelatedGaussianNoise(action_dim, sigma=0.15) for _ in range(num_agents)]
+        self.noise = [UncorrelatedGaussianNoise(action_dim) for _ in range(num_agents)]
         
         # Optimizers
         actor_lr = config['learning'].get('actor_lr', 1e-4)
@@ -99,7 +101,7 @@ class MARDPG_Gaussian:
                 
                 if explore:
                     action += self.noise[i].sample()
-                    self.noise[i].step() # does nothing for static
+                    self.noise[i].step() # decay exploration noise
                 
                 action = np.clip(action, -3.5, 3.5)
                 actions.append(action)
