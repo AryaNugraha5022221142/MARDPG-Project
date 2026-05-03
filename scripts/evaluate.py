@@ -95,9 +95,12 @@ def main():
     # Trajectory storage for plotting (first 5 episodes)
     all_trajectories = []
     
+    ep_agent_status = ['trapped'] * env.num_agents
+    
     try:
         for ep in range(args.episodes):
             obs, _ = env.reset()
+            ep_agent_status = ['trapped'] * env.num_agents
             if args.agent in ['mardpg', 'iddpg', 'mardpg_g']:
                 actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
                 critic_hidden = [agent.critics[i].init_hidden(1, device) for i in range(env.num_agents)]
@@ -122,6 +125,17 @@ def main():
                     actions = agent.select_actions(obs, explore=False)
                     
                 obs, rewards, terminated, truncated, info = env.step(actions)
+                
+                # Check why each agent terminated
+                for i in range(env.num_agents):
+                    if info['agent_terminated_now'][i]:
+                        # Was it success or collision?
+                        dist_to_goal = np.linalg.norm(env.agents[i].state[0:3] - env.goals[i])
+                        if dist_to_goal < env.goal_dist:
+                            ep_agent_status[i] = 'success'
+                        else:
+                            ep_agent_status[i] = 'collision'
+                            
                 done = terminated or truncated
                 steps += 1
                 
@@ -135,12 +149,18 @@ def main():
             if args.render:
                 env.render()
                 
+            for i in range(env.num_agents):
+                if ep_agent_status[i] == 'success':
+                    successes += 1
+                    agent_success_counts[i] += 1
+                    times_to_goal.append(steps)
+                elif ep_agent_status[i] == 'collision':
+                    collisions += 1
+                    
             if info.get('success', False):
-                successes += 1
-                agent_success_counts += 1 # Assuming all agents reached goal for success
-                times_to_goal.append(steps)
+                pass # Already recorded
             elif info.get('collision', False):
-                collisions += 1
+                pass # Already recorded
                 
             # Collect EE Metrics
             all_jerks.append(np.mean(env.total_jerk))
@@ -158,8 +178,9 @@ def main():
         print("\nEvaluation interrupted by user! Generating plots from collected data...")
         args.episodes = max(1, len(all_jerks)) # Avoid div by zero
         
-    success_rate = successes / args.episodes * 100
-    collision_rate = collisions / args.episodes * 100
+    total_agents = args.episodes * env.num_agents
+    success_rate = successes / total_agents * 100
+    collision_rate = collisions / total_agents * 100
     trapped_rate = 100 - success_rate - collision_rate
     avg_time = np.mean(times_to_goal) if times_to_goal else 0
     

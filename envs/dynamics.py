@@ -9,6 +9,8 @@ class QuadcopterDynamics:
         self.dt = dt
         self.tau = tau
         self.noise_std = noise_std
+        self.velocity_noise_std = 0.1
+        self.yaw_noise_std = np.deg2rad(2.0)
         self.is_saturated = False
         
         # State: [x, y, z, phi, theta, psi, vx, vy, vz, omega_x, omega_y, omega_z]
@@ -28,13 +30,13 @@ class QuadcopterDynamics:
         yaw_rate_cmd_rad = np.deg2rad(velocity_ref[3])
         self.is_saturated = False
         
-        # Add small process noise to velocity commands for robustness
-        v_cmd_noisy = velocity_ref[0:3] + np.random.normal(0, 0.1, size=3)
-        
         for _ in range(M):
             for j, axis in enumerate([0, 1, 2]):
+                # Velocity measurement noise: \hat{v} = v + N(0, \sigma_v^2)
+                v_hat = self.state[6+j] + np.random.normal(0, self.velocity_noise_std)
+                
                 # Pure velocity feedback LQR mapping
-                u_j = lqr.compute_velocity_input(v_cmd_noisy[j], self.state[6+j])
+                u_j = lqr.compute_velocity_input(velocity_ref[j], v_hat)
                 
                 if abs(u_j) > 5.0:
                     self.is_saturated = True

@@ -63,10 +63,10 @@ class QuadcopterEnv:
         self.agent_dones = np.zeros(self.num_agents, dtype=bool)
         self.prev_actions = np.zeros((self.num_agents, 4), dtype=np.float32)
         self.prev_ranges_norm = np.zeros((self.num_agents, 25), dtype=np.float32)
-        self.prev_sensor_noise = np.zeros((self.num_agents, 25), dtype=np.float32)
         
         # Ablation options
         self.sensor_noise_std = config.get('sensor_noise_std', 0.02) # 2% default
+        self.yaw_noise_std = config.get('yaw_noise_std', np.deg2rad(2.0)) # 2 degree default
         self.reward_type = config.get('reward_type', 'exponential') # 'linear' or 'exponential'
         
         # Reward weights from config
@@ -209,7 +209,6 @@ class QuadcopterEnv:
         self.prev_vel = np.zeros((self.num_agents, 3), dtype=np.float32)
         self.prev_actions = np.zeros((self.num_agents, 4), dtype=np.float32)
         self.prev_ranges_norm = np.zeros((self.num_agents, 25), dtype=np.float32)
-        self.prev_sensor_noise = np.zeros((self.num_agents, 25), dtype=np.float32)
         
         # Random start positions on the "left" side
         for i in range(self.num_agents):
@@ -266,7 +265,11 @@ class QuadcopterEnv:
         for i in range(self.num_agents):
             state = self.agents[i].state
             pos = state[0:3]
-            yaw = state[5]
+            
+            # Yaw measurement noise Eq. 3.43: \hat{\psi}_i(t) = \psi_i(t) + \mathcal{N}(0, \sigma_\psi^2)
+            yaw_gt = state[5]
+            yaw = yaw_gt + np.random.normal(0, self.yaw_noise_std)
+            
             goal = self.goals[i]
             
             # 1. Vectorized Rangefinder
@@ -352,14 +355,10 @@ class QuadcopterEnv:
                 tn = -pos[dim] / (dir_vecs[:, dim] - 1e-8)
                 ranges = np.where(mask_n & (tn < ranges), tn, ranges)
             
-            # Apply AR(1) temporally correlated noise
-            rho = 0.85
-            eta = np.random.normal(0, self.sensor_noise_std * self.max_range, 25)
-            epsilon = rho * self.prev_sensor_noise[i] + eta
-            self.prev_sensor_noise[i] = epsilon
-            
-            ranges = np.clip(ranges + epsilon, 0, self.max_range)
+            # Apply LiDAR measurement noise Eq 3.41: \tilde{\ell}_{i,t}^{(l)} = \ell_{i,t}^{(l)}/r_{\max} + \mathcal{N}(0, \sigma_\ell^2)
             ranges_norm = ranges / self.max_range
+            ranges_norm = ranges_norm + np.random.normal(0, self.sensor_noise_std, 25)
+            ranges_norm = np.clip(ranges_norm, 0.0, 1.0)
             
             # Goal info
             rel_pos = goal - pos
