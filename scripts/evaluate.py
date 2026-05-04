@@ -29,9 +29,12 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() and config['training'].get('device') == 'cuda' else "cpu")
     
+    env_config = config['environment'].copy()
+    env_config['agent_id_dim'] = config['training']['num_agents']
+    
     env = QuadcopterEnv(
         num_agents=config['training']['num_agents'], 
-        config=config['environment'],
+        config=env_config,
         render_mode='human' if args.render else None,
         scenario=args.scenario
     )
@@ -40,7 +43,7 @@ def main():
         env.set_curriculum_level(args.level)
         print(f"Evaluating on Curriculum Level {args.level}")
         
-    obs_dim = config['environment'].get('obs_dim', 34)
+    obs_dim = env.obs_dim
     
     if args.agent in ['mardpg', 'iddpg']:
         agent = MARDPG(

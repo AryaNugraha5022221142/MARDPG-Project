@@ -21,45 +21,35 @@ class KinematicDynamics:
 
     def rl_step(self, action: np.ndarray, lqr=None, M: int = 1):
         """
-        action: [p, tau] (steering signals)
-        p: yaw steering (changes phi/psi)
-        tau: pitch steering (changes theta/vartheta)
+        action: [yaw_rate, pitch_rate] in rad/s.
+        M: number of inner simulation ticks represented by one outer RL step.
         """
-        p = action[0]
-        tau = action[1]
-        
-        # In the context of MARDPG kinematic model, steering signals update angles directly.
-        # It's an end-to-end update where the signals are directly added per timestep.
-        # Or, they act as rate commands. Given the text: "These signals are added directly
-        # to the current heading angles to determine the UAVs position in the next time step"
-        
-        # New heading angles:
-        self.state[5] += p # yaw (psi)
-        self.state[4] += tau # pitch (theta)
-        
+        yaw_rate = float(action[0])
+        pitch_rate = float(action[1])
+        control_dt = self.dt * M
+
+        self.state[5] += yaw_rate * control_dt
+        self.state[4] += pitch_rate * control_dt
+
+        self.state[5] = (self.state[5] + np.pi) % (2 * np.pi) - np.pi
+        self.state[4] = np.clip(self.state[4], -np.pi / 2, np.pi / 2)
+
         yaw = self.state[5]
         pitch = self.state[4]
-        
-        # Position update based on constant velocity and new heading:
-        # v_x = v * cos(pitch) * cos(yaw)
-        # v_y = v * cos(pitch) * sin(yaw)
-        # v_z = v * sin(pitch)
-        
+
         vx = self.v * np.cos(pitch) * np.cos(yaw)
         vy = self.v * np.cos(pitch) * np.sin(yaw)
         vz = self.v * np.sin(pitch)
-        
+
         self.state[6] = vx
         self.state[7] = vy
         self.state[8] = vz
-        
-        # Update position
-        self.state[0] += vx * self.dt
-        self.state[1] += vy * self.dt
-        self.state[2] += vz * self.dt
-        
-        # Wrap angles to [-pi, pi]
-        self.state[5] = (self.state[5] + np.pi) % (2 * np.pi) - np.pi
-        self.state[4] = np.clip(self.state[4], -np.pi/2, np.pi/2)
-        
+
+        self.state[0] += vx * control_dt
+        self.state[1] += vy * control_dt
+        self.state[2] += vz * control_dt
+
+        self.state[10] = pitch_rate
+        self.state[11] = yaw_rate
+
         return self.state.copy()

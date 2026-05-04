@@ -76,6 +76,7 @@ def main():
         scenario_config = get_scenario_config(args.scenario)
         env_config.update(scenario_config)
     
+    env_config['agent_id_dim'] = config['training']['num_agents']
     env_config['sensor_noise_std'] = args.sensor_noise
     env_config['reward_type'] = args.reward_type
 
@@ -87,7 +88,7 @@ def main():
     )
 
     # Agent
-    obs_dim = config['environment'].get('obs_dim', 41)
+    obs_dim = env.obs_dim
 
     # Logging
     use_wandb = config['logging'].get('use_wandb', False)
@@ -175,6 +176,9 @@ def main():
                     recent_collisions.clear()
 
             obs, _ = env.reset()
+            if obs.shape[1] != obs_dim:
+                raise ValueError(f"Observation dim mismatch: env returned {obs.shape[1]}, agent expects {obs_dim}")
+            
             if args.agent in ['mardpg', 'iddpg', 'mardpg_g', 'mardpg_baseline']:
                 actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
                 critic_hidden = [agent.critics[i].init_hidden(1, device) for i in range(env.num_agents)]

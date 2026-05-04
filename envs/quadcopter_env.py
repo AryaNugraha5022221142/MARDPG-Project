@@ -36,6 +36,7 @@ class QuadcopterEnv:
                 'dt': 0.01,
                 'dynamic_ratio': 0.3
             }
+        self.config = config
         self.arena_size = np.array(config['arena_size'], dtype=np.float32)
         self.num_obstacles = config['num_obstacles']
         self.max_range = config['rangefinder_max_range']
@@ -46,6 +47,9 @@ class QuadcopterEnv:
         self.M = config.get('inner_steps', 10)
         self.cooperative = config.get('cooperative', False)
         self.rate_limit_per_step = config.get('rate_limit_per_step', 1.0)
+        self.action_bound = float(config.get('action_bound', 2.5))
+        self.agent_id_dim = int(config.get('agent_id_dim', self.num_agents))
+        self.obs_dim = 25 + 5 + 3 + 1 + 4 + self.agent_id_dim
         
         self.arena_diagonal = np.linalg.norm(self.arena_size)
         
@@ -376,15 +380,16 @@ class QuadcopterEnv:
             # Saturation indicator (Bug 14)
             is_saturated = float(getattr(self.agents[i], 'is_saturated', False))
             
-            agent_id_onehot = np.zeros(self.num_agents, dtype=np.float32)
-            agent_id_onehot[i] = 1.0
+            agent_id_onehot = np.zeros(self.agent_id_dim, dtype=np.float32)
+            if i < self.agent_id_dim:
+                agent_id_onehot[i] = 1.0
             
             obs = np.concatenate([
                 ranges_norm,
                 [dist_norm, np.sin(theta_goal), np.cos(theta_goal), np.sin(phi_goal), np.cos(phi_goal)],
                 vel_norm,
                 [is_saturated],
-                self.prev_actions[i] / 2.5,
+                self.prev_actions[i] / self.action_bound,
                 agent_id_onehot
             ])
             obs_all.append(obs)
@@ -534,7 +539,7 @@ class QuadcopterEnv:
             # Default reward calculation parts (for non-baseline)
             r_transfer = 3.0 * (old_dist_to_goal - dist_to_goal)
             
-            if self.config.get('reward_type') == 'baseline':
+            if self.reward_type == 'baseline':
                 # Baseline Specific Reward
                 alpha = 3.0
                 lam = 5.0
@@ -559,7 +564,8 @@ class QuadcopterEnv:
             else:
                 collision_penalty = -5.0 * max(0.0, 1.5 - d_min)**2
                 step_penalty = -0.02
-                tracking_penalty = -0.3 * float(tracking_errors[i]) ** 2
+                tracking_weight = self.reward_config.get('weights', {}).get('tracking', 0.3)
+                tracking_penalty = -tracking_weight * float(tracking_errors[i]) ** 2
                 dense_r = r_transfer + action_penalty + collision_penalty + step_penalty + tracking_penalty
             
             terminal_bonus = 0.0
