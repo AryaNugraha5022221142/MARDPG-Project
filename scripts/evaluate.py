@@ -201,15 +201,10 @@ def main():
     avg_jerk = np.mean(all_jerks)
     avg_safety = np.mean(all_safety_frontiers)
     
-    # Path Efficiency
-    valid_efficiencies = []
-    for i in range(len(path_lengths)):
-        if path_lengths[i] > 0.5:
-            eff = (ideal_lengths[i] / path_lengths[i])
-            valid_efficiencies.append(min(eff, 1.0))
-        else:
-            valid_efficiencies.append(0.0)
-    avg_efficiency = np.mean(valid_efficiencies) if valid_efficiencies else 0.0
+    # Path Efficiency: The ratio of the sum of the straight-line distance between the starting point and the target point of all agents to the sum of the actual trajectory lengths of all agents.
+    sum_ideal = np.sum(ideal_lengths)
+    sum_actual = np.sum(path_lengths)
+    avg_efficiency = (sum_ideal / sum_actual) if sum_actual > 0 else 0.0
     
     print("=== Evaluation Results ===")
     print(f"Episodes: {args.episodes}")
