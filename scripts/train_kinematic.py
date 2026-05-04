@@ -14,7 +14,7 @@ from tqdm import tqdm
 # Add the project root to the Python path so it can find 'envs' and 'agents'
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from envs import QuadcopterEnv
+from envs import QuadcopterKinematicEnv
 from agents import MARDPG, MADDPG, MARTD3, MARDPG_Gaussian
 
 def _make_agent(agent_type, obs_dim, action_dim, num_agents, config, device):
@@ -79,7 +79,7 @@ def main():
     env_config['sensor_noise_std'] = args.sensor_noise
     env_config['reward_type'] = args.reward_type
 
-    env = QuadcopterEnv(
+    env = QuadcopterKinematicEnv(
         num_agents=config['training']['num_agents'], 
         config=env_config,
         render_mode='human' if args.render else None,
@@ -126,11 +126,11 @@ def main():
 
     # Re-create env and agent with 1 agent to start
     env_config_1 = env_config.copy()
-    env = QuadcopterEnv(num_agents=1, config=env_config_1,
+    env = QuadcopterKinematicEnv(num_agents=1, config=env_config_1,
                         render_mode='human' if args.render else None,
                         scenario=args.scenario)
     env.set_curriculum_level(curriculum_level)
-    agent = _make_agent(args.agent, obs_dim, 4, 1, config, device)
+    agent = _make_agent(args.agent, obs_dim, 2, 1, config, device)
     
     # Academic Data Tracking
     reward_history = []
@@ -162,12 +162,12 @@ def main():
                     print(f"\n[Agent Curriculum] Upgrading to {current_num_agents} agents at episode {episode}")
                     # Save actor weights
                     actor_state = agent.actor.state_dict()
-                    env = QuadcopterEnv(num_agents=current_num_agents,
+                    env = QuadcopterKinematicEnv(num_agents=current_num_agents,
                                        config=env_config.copy(),
                                        render_mode='human' if args.render else None,
                                        scenario=args.scenario)
                     env.set_curriculum_level(curriculum_level)
-                    agent = _make_agent(args.agent, obs_dim, 4, current_num_agents, config, device)
+                    agent = _make_agent(args.agent, obs_dim, 2, current_num_agents, config, device)
                     # Transfer actor weights
                     agent.actor.load_state_dict(actor_state, strict=False)
                     agent.actor_target.load_state_dict(actor_state, strict=False)

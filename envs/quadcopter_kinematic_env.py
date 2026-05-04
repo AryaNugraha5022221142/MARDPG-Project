@@ -1,10 +1,9 @@
-# envs/quadcopter_env.py
+# envs/quadcopter_kinematic_env.py
 import numpy as np
 from typing import Tuple, Dict, Any, List
-from .dynamics import QuadcopterDynamics
-from .lqr_controller import PerAxisLQR
+from .kinematic_dynamics import KinematicDynamics
 
-class QuadcopterEnv:
+class QuadcopterKinematicEnv:
     """
     Multi-agent quadcopter environment with 3D obstacles.
     """
@@ -49,8 +48,7 @@ class QuadcopterEnv:
         
         self.arena_diagonal = np.linalg.norm(self.arena_size)
         
-        self.agents = [QuadcopterDynamics(dt=self.dt) for _ in range(self.num_agents)]
-        self.lqr = PerAxisLQR(dt=self.dt)
+        self.agents = [KinematicDynamics(dt=self.dt, v=2.0) for _ in range(self.num_agents)]
         
         # Dynamic goals based on arena size
         self.goals = np.zeros((self.num_agents, 3), dtype=np.float32)
@@ -61,7 +59,7 @@ class QuadcopterEnv:
         self.max_steps = config.get('max_steps', 2000)
         self.prev_dist_to_goal = np.zeros(self.num_agents, dtype=np.float32)
         self.agent_dones = np.zeros(self.num_agents, dtype=bool)
-        self.prev_actions = np.zeros((self.num_agents, 4), dtype=np.float32)
+        self.prev_actions = np.zeros((self.num_agents, 2), dtype=np.float32)
         self.prev_ranges_norm = np.zeros((self.num_agents, 25), dtype=np.float32)
         
         # Ablation options
@@ -207,7 +205,7 @@ class QuadcopterEnv:
         self.safety_frontier = np.ones(self.num_agents, dtype=np.float32) * float('inf')
         self.prev_accel = np.zeros((self.num_agents, 3), dtype=np.float32)
         self.prev_vel = np.zeros((self.num_agents, 3), dtype=np.float32)
-        self.prev_actions = np.zeros((self.num_agents, 4), dtype=np.float32)
+        self.prev_actions = np.zeros((self.num_agents, 2), dtype=np.float32)
         self.prev_ranges_norm = np.zeros((self.num_agents, 25), dtype=np.float32)
         
         # Random start positions on the "left" side
@@ -470,18 +468,10 @@ class QuadcopterEnv:
             r_smooth_arr[i] = -self.reward_config.get('weights', {}).get('smoothness', 0.01) * np.sum((action - self.prev_actions[i])**2)
             self.prev_actions[i] = action.copy()
             
-            # Network already outputs in [-3.5, 3.5]; do NOT rescale again.
-            vx_cmd, vy_cmd, vz_cmd = action[0], action[1], action[2]
-            # Yaw: network outputs [-3.5, 3.5]; scale so max = pi/4 rad/s ~ 45 deg/s:
-            yaw_rate_cmd = action[3] * (45.0 / 3.5)     # stays under thesis bound
-            
-            yaw = self.agents[i].state[5]
-            vx_world = vx_cmd * np.cos(yaw) - vy_cmd * np.sin(yaw)
-            vy_world = vx_cmd * np.sin(yaw) + vy_cmd * np.cos(yaw)
-            world_cmd = np.array([vx_world, vy_world, vz_cmd, yaw_rate_cmd])
-            
             old_vel = self.agents[i].state[6:9].copy()
-            self.agents[i].rl_step(world_cmd, self.lqr, M=self.M)
+            
+            # Kinematic update: action is [p, tau]
+            self.agents[i].rl_step(action)
             
             # Confine flight to arena size (specifically altitude)
             # state[0:3] = [x, y, z]
@@ -491,15 +481,14 @@ class QuadcopterEnv:
             
             new_vel = self.agents[i].state[6:9]
             
-            accel = (new_vel - old_vel) / (self.dt * self.M)
-            jerk_val = np.linalg.norm(accel - self.prev_accel[i]) / (self.dt * self.M)
+            accel = (new_vel - old_vel) / self.dt
+            jerk_val = np.linalg.norm(accel - self.prev_accel[i]) / self.dt
             self.total_jerk[i] += jerk_val
             self.prev_accel[i] = accel.copy()
             jerk_arr[i] = jerk_val
             
-            # Record tracking error
-            v_ref_world = world_cmd[0:3]
-            tracking_errors[i] = np.linalg.norm(v_ref_world - new_vel)
+            # No tracking errors since no LQR reference tracking
+            tracking_errors[i] = 0.0
             
         obs = self._get_observations()
         rewards = np.zeros(self.num_agents, dtype=np.float32)
