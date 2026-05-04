@@ -158,6 +158,9 @@ class QuadcopterEnv:
         Level 1: 50x50x20, 5 obstacles, 0% dynamic
         Level 2: 75x75x30, 15 obstacles, 10% dynamic
         Level 3: 100x100x40, 25 obstacles, 20% dynamic
+        Level 4: 130x130x50, 35 obstacles, 25% dynamic
+        Level 5: 160x160x60, 50 obstacles, 30% dynamic
+        Level 6: 160x160x60, 65 obstacles, 40% dynamic
         """
         if level == 0:
             self.arena_size = np.array([30, 30, 15], dtype=np.float32)
@@ -171,10 +174,22 @@ class QuadcopterEnv:
             self.arena_size = np.array([75, 75, 30], dtype=np.float32)
             self.num_obstacles = 15
             self.dynamic_ratio = 0.1
-        else:
+        elif level == 3:
             self.arena_size = np.array([100, 100, 40], dtype=np.float32)
-            self.num_obstacles = 15 + (level - 2) * 10
-            self.dynamic_ratio = min(0.1 + (level - 2) * 0.1, 0.5)
+            self.num_obstacles = 25
+            self.dynamic_ratio = 0.2
+        elif level == 4:
+            self.arena_size = np.array([130, 130, 50], dtype=np.float32)
+            self.num_obstacles = 35
+            self.dynamic_ratio = 0.25
+        elif level == 5:
+            self.arena_size = np.array([160, 160, 60], dtype=np.float32)
+            self.num_obstacles = 50
+            self.dynamic_ratio = 0.3
+        else:
+            self.arena_size = np.array([160, 160, 60], dtype=np.float32)
+            self.num_obstacles = 65
+            self.dynamic_ratio = 0.4
             
         self.arena_diagonal = float(np.linalg.norm(self.arena_size))
         print(f"[DEBUG] quadcopter_env initialized with arena_size: {self.arena_size}, scenario: {self.scenario}")
@@ -510,6 +525,8 @@ class QuadcopterEnv:
         rewards = np.zeros(self.num_agents, dtype=np.float32)
         info = {'success': False, 'collision': getattr(self, '_episode_collision', False)}
         info['agent_terminated_now'] = np.zeros(self.num_agents, dtype=bool)
+        info['agent_success'] = np.zeros(self.num_agents, dtype=bool)
+        info['agent_collision'] = np.zeros(self.num_agents, dtype=bool)
         
         active_mask = ~self.agent_dones
         info['tracking_error'] = float(np.mean(tracking_errors[active_mask])) if np.any(active_mask) else 0.0
@@ -620,6 +637,9 @@ class QuadcopterEnv:
             info['individual_success_rate'] = individual_successes / self.num_agents
             info['success'] = (individual_successes == self.num_agents) and not getattr(self, '_episode_collision', False)
             
+        info['agent_success'] = np.array([self.agent_dones[i] and np.linalg.norm(self.agents[i].state[0:3] - self.goals[i]) < self.goal_dist for i in range(self.num_agents)], dtype=bool)
+        info['agent_collision'] = self.agent_dones & ~info['agent_success']
+        
         truncated = self.step_count >= self.max_steps
         self.last_info = info
         return obs, rewards, terminated, truncated, info

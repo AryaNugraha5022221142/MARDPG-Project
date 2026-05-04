@@ -113,17 +113,39 @@ def main():
     recent_success = deque(maxlen=100)
     recent_lengths = deque(maxlen=100)
     recent_collisions = deque(maxlen=100)
+    recent_collisions_per_agent = deque(maxlen=100)
     
     # Curriculum Learning
     curriculum_level = 0
-    success_threshold = 0.40        # require 40% sustained success before advancing
-    min_episodes_per_level = 2000   # never advance before at least 2000 episodes at this level
+    # require adaptive sustained success before advancing
+    min_episodes_per_level = 2000
     episodes_at_level = 0
-    env.set_curriculum_level(curriculum_level)
+    env_curriculum_locked = False
+    env_curriculum_lock_until = 0
     
-    # Agent-count curriculum schedule: episode thresholds to add agents
-    agent_count_schedule = {0: 1, 2000: 2, 5000: 3}   # episode -> num_agents
+    # Agent-count curriculum schedule: thresholds based on competency
+    agent_grad_success_threshold = {1: 0.65, 2: 0.60, 3: 0.55, 4: 0.50, 5: 0.48}
+    agent_grad_collision_threshold = {1: 0.20, 2: 0.22, 3: 0.25, 4: 0.28, 5: 0.30}
     current_num_agents = 1
+    episodes_at_agent_level = 0
+    target_max_agents = config['training']['num_agents']
+    
+    def set_lr_scale(agent, scale):
+        actor_lr = config['learning'].get('actor_lr', 1e-4) * scale
+        critic_lr = config['learning'].get('critic_lr', 1e-3) * scale
+        if hasattr(agent, 'actor_optimizer'):
+            for pg in agent.actor_optimizer.param_groups:
+                pg['lr'] = actor_lr
+        if hasattr(agent, 'critic_optimizer'):
+            for pg in agent.critic_optimizer.param_groups:
+                pg['lr'] = critic_lr
+        elif hasattr(agent, 'critic_optimizers_1'):
+            for opt in agent.critic_optimizers_1:
+                for pg in opt.param_groups: pg['lr'] = critic_lr
+            for opt in agent.critic_optimizers_2:
+                for pg in opt.param_groups: pg['lr'] = critic_lr
+
+    warmup_until = 0
 
     # Re-create env and agent with 1 agent to start
     env_config_1 = env_config.copy()
@@ -157,23 +179,41 @@ def main():
     try:
         for episode in pbar:
             # Agent-count curriculum
-            for threshold_ep, target_n in sorted(agent_count_schedule.items()):
-                if episode >= threshold_ep and current_num_agents < target_n:
-                    current_num_agents = target_n
-                    print(f"\n[Agent Curriculum] Upgrading to {current_num_agents} agents at episode {episode}")
-                    # Save actor weights
-                    actor_state = agent.actor.state_dict()
-                    env = QuadcopterEnv(num_agents=current_num_agents,
-                                       config=env_config.copy(),
-                                       render_mode='human' if args.render else None,
-                                       scenario=args.scenario)
-                    env.set_curriculum_level(curriculum_level)
-                    agent = _make_agent(args.agent, obs_dim, 4, current_num_agents, config, device)
-                    # Transfer actor weights
-                    agent.actor.load_state_dict(actor_state, strict=False)
-                    agent.actor_target.load_state_dict(actor_state, strict=False)
-                    recent_success.clear()
-                    recent_collisions.clear()
+            min_agent_level_episodes = max(1500, 1000 * current_num_agents)
+            if current_num_agents < target_max_agents:
+                rolling_per_agent_success = np.mean(recent_success) if len(recent_success) == 100 else 0.0
+                rolling_per_agent_collision = np.mean(recent_collisions_per_agent) if len(recent_collisions_per_agent) == 100 else 1.0
+
+                if episodes_at_agent_level >= min_agent_level_episodes:
+                    if rolling_per_agent_success >= agent_grad_success_threshold.get(current_num_agents, 0.48):
+                        if rolling_per_agent_collision < agent_grad_collision_threshold.get(current_num_agents, 0.30):
+                            current_num_agents += 1
+                            print(f"\n[Agent Curriculum] Upgrading to {current_num_agents} agents at episode {episode}")
+                            # Save actor weights
+                            actor_state = agent.actor.state_dict()
+                            env = QuadcopterEnv(num_agents=current_num_agents,
+                                               config=env_config.copy(),
+                                               render_mode='human' if args.render else None,
+                                               scenario=args.scenario)
+                            env.set_curriculum_level(curriculum_level)
+                            agent = _make_agent(args.agent, obs_dim, 4, current_num_agents, config, device)
+                            # Transfer actor weights
+                            agent.actor.load_state_dict(actor_state, strict=False)
+                            agent.actor_target.load_state_dict(actor_state, strict=False)
+                            recent_success.clear()
+                            recent_collisions.clear()
+                            recent_collisions_per_agent.clear()
+                            if hasattr(agent.memory, 'clear'):
+                                agent.memory.clear()
+                            episodes_at_agent_level = 0
+                            env_curriculum_locked = True
+                            env_curriculum_lock_until = episode + 1500
+                            warmup_until = episode + 200
+                            
+            if episode == warmup_until:
+                set_lr_scale(agent, 1.0)
+            elif episode < warmup_until:
+                set_lr_scale(agent, 0.3)
 
             obs, _ = env.reset()
             if obs.shape[1] != obs_dim:
@@ -259,6 +299,8 @@ def main():
             recent_success.append(info.get('individual_success_rate', 0.0))
             recent_lengths.append(episode_length)
             recent_collisions.append(float(episode_collision))
+            agent_col_rate = info.get('agent_collision', np.zeros(current_num_agents, dtype=bool)).sum() / current_num_agents
+            recent_collisions_per_agent.append(agent_col_rate)
             recent_sat_rates.append(np.mean(episode_sat_rates))
             recent_act_stds.append(np.mean(episode_act_stds))
             
@@ -292,12 +334,20 @@ def main():
             # Update Curriculum
     
             episodes_at_level += 1
+            episodes_at_agent_level += 1
+            
+            if env_curriculum_locked:
+                if episode >= env_curriculum_lock_until or (len(recent_success) == 100 and current_success_rate > 0.50):
+                    env_curriculum_locked = False
+                    
             if episode % 100 == 0:
+                adjusted_success_threshold = 0.40 * (0.85 ** max(0, current_num_agents - 3))
                 ready = (
-                    len(recent_success) == 100
-                    and current_success_rate >= success_threshold
+                    not env_curriculum_locked
+                    and len(recent_success) == 100
+                    and current_success_rate >= adjusted_success_threshold
                     and current_collision_rate < 0.30   # also require collision < 30%
-                    and curriculum_level < 4
+                    and curriculum_level < 6
                     and episodes_at_level >= min_episodes_per_level
                 )
                 if ready:

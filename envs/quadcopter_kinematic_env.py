@@ -615,6 +615,9 @@ class QuadcopterKinematicEnv:
             info['individual_success_rate'] = individual_successes / self.num_agents
             info['success'] = (individual_successes == self.num_agents) and not getattr(self, '_episode_collision', False)
             
+        info['agent_success'] = np.array([self.agent_dones[i] and np.linalg.norm(self.agents[i].state[0:3] - self.goals[i]) < self.goal_dist for i in range(self.num_agents)], dtype=bool)
+        info['agent_collision'] = self.agent_dones & ~info['agent_success']
+        
         truncated = self.step_count >= self.max_steps
         self.last_info = info
         return obs, rewards, terminated, truncated, info
