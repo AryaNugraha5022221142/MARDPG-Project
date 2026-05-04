@@ -17,6 +17,25 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from envs import QuadcopterEnv
 from agents import MARDPG, MADDPG, MARTD3, MARDPG_Gaussian
 
+def _make_agent(agent_type, obs_dim, action_dim, num_agents, config, device):
+    if agent_type in ['mardpg', 'iddpg']:
+        from agents import MARDPG
+        return MARDPG(obs_dim=obs_dim, action_dim=action_dim, num_agents=num_agents,
+                      config=config, device=device,
+                      independent_critics=(agent_type == 'iddpg'))
+    elif agent_type == 'martd3':
+        from agents import MARTD3
+        return MARTD3(obs_dim=obs_dim, action_dim=action_dim, num_agents=num_agents,
+                      config=config, device=device, independent_critics=False)
+    elif agent_type == 'mardpg_g':
+        from agents import MARDPG_Gaussian
+        return MARDPG_Gaussian(obs_dim=obs_dim, action_dim=action_dim, num_agents=num_agents,
+                               config=config, device=device, independent_critics=False)
+    else:
+        from agents import MADDPG
+        return MADDPG(obs_dim=obs_dim, action_dim=action_dim, num_agents=num_agents,
+                      config=config, device=device)
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='config/config.yaml', help='Path to config file')
@@ -64,42 +83,7 @@ def main():
     )
 
     # Agent
-    obs_dim = config['environment'].get('obs_dim', 34)
-    if args.agent in ['mardpg', 'iddpg']:
-        agent = MARDPG(
-            obs_dim=obs_dim, 
-            action_dim=4, 
-            num_agents=config['training']['num_agents'], 
-            config=config, 
-            device=device,
-            independent_critics=(args.agent == 'iddpg')
-        )
-    elif args.agent == 'martd3':
-        agent = MARTD3(
-            obs_dim=obs_dim, 
-            action_dim=4, 
-            num_agents=config['training']['num_agents'], 
-            config=config, 
-            device=device,
-            independent_critics=False
-        )
-    elif args.agent == 'mardpg_g':
-        agent = MARDPG_Gaussian(
-            obs_dim=obs_dim, 
-            action_dim=4, 
-            num_agents=config['training']['num_agents'], 
-            config=config, 
-            device=device,
-            independent_critics=False
-        )
-    else:
-        agent = MADDPG(
-            obs_dim=obs_dim, 
-            action_dim=4, 
-            num_agents=config['training']['num_agents'], 
-            config=config, 
-            device=device
-        )
+    obs_dim = config['environment'].get('obs_dim', 41)
 
     # Logging
     use_wandb = config['logging'].get('use_wandb', False)
@@ -127,8 +111,22 @@ def main():
     
     # Curriculum Learning
     curriculum_level = 0
-    success_threshold = 0.15  # 15% success to move to next level
+    success_threshold = 0.40        # require 40% sustained success before advancing
+    min_episodes_per_level = 2000   # never advance before at least 2000 episodes at this level
+    episodes_at_level = 0
     env.set_curriculum_level(curriculum_level)
+    
+    # Agent-count curriculum schedule: episode thresholds to add agents
+    agent_count_schedule = {0: 1, 2000: 2, 5000: 3}   # episode -> num_agents
+    current_num_agents = 1
+
+    # Re-create env and agent with 1 agent to start
+    env_config_1 = env_config.copy()
+    env = QuadcopterEnv(num_agents=1, config=env_config_1,
+                        render_mode='human' if args.render else None,
+                        scenario=args.scenario)
+    env.set_curriculum_level(curriculum_level)
+    agent = _make_agent(args.agent, obs_dim, 4, 1, config, device)
     
     # Academic Data Tracking
     reward_history = []
@@ -153,6 +151,25 @@ def main():
     pbar = tqdm(range(1, num_episodes + 1), desc="Training")
     try:
         for episode in pbar:
+            # Agent-count curriculum
+            for threshold_ep, target_n in sorted(agent_count_schedule.items()):
+                if episode >= threshold_ep and current_num_agents < target_n:
+                    current_num_agents = target_n
+                    print(f"\n[Agent Curriculum] Upgrading to {current_num_agents} agents at episode {episode}")
+                    # Save actor weights
+                    actor_state = agent.actor.state_dict()
+                    env = QuadcopterEnv(num_agents=current_num_agents,
+                                       config=env_config.copy(),
+                                       render_mode='human' if args.render else None,
+                                       scenario=args.scenario)
+                    env.set_curriculum_level(curriculum_level)
+                    agent = _make_agent(args.agent, obs_dim, 4, current_num_agents, config, device)
+                    # Transfer actor weights
+                    agent.actor.load_state_dict(actor_state, strict=False)
+                    agent.actor_target.load_state_dict(actor_state, strict=False)
+                    recent_success.clear()
+                    recent_collisions.clear()
+
             obs, _ = env.reset()
             if args.agent in ['mardpg', 'iddpg', 'mardpg_g']:
                 actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
@@ -266,16 +283,24 @@ def main():
     
             # Update Curriculum
     
+            episodes_at_level += 1
             if episode % 100 == 0:
-                if len(recent_success) == 100 and current_success_rate >= success_threshold and curriculum_level < 4:
+                ready = (
+                    len(recent_success) == 100
+                    and current_success_rate >= success_threshold
+                    and current_collision_rate < 0.30   # also require collision < 30%
+                    and curriculum_level < 4
+                    and episodes_at_level >= min_episodes_per_level
+                )
+                if ready:
                     curriculum_level += 1
+                    episodes_at_level = 0
                     env.set_curriculum_level(curriculum_level)
-                    # Flush buffer on curriculum change to prevent stale data corruption
                     if hasattr(agent.memory, 'clear'):
                         agent.memory.clear()
                         print(f"Curriculum Level Up! Level: {curriculum_level}. Buffer cleared.")
-                    # Reset success buffer to allow agent to adapt to new difficulty
                     recent_success.clear()
+                    recent_collisions.clear()
             
             if episode % config['logging']['log_interval'] == 0:
                 avg_reward = current_avg_reward

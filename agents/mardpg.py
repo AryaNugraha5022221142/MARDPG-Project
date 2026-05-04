@@ -68,8 +68,8 @@ class MARDPG:
         # This allows exploration to organically decay properly over the full 5000 episodes.
         self.noise = [AdaptiveGaussianNoise(action_dim,
                                             sigma_start=0.5,
-                                            sigma_end=0.05,
-                                            total_steps=3_000_000) for _ in range(num_agents)]
+                                            sigma_end=0.10,
+                                            total_steps=10_000_000) for _ in range(num_agents)]
         
         # Optimizers
         actor_lr = config['learning'].get('actor_lr', 1e-4)
@@ -117,7 +117,7 @@ class MARDPG:
                     action += self.noise[i].sample()
                     self.noise[i].step() # anneal after each call
                 
-                action = np.clip(action, -3.5, 3.5)
+                action = np.clip(action, -2.5, 2.5)
                 actions.append(action)
                 
                 # Store hidden state for critic
@@ -156,12 +156,12 @@ class MARDPG:
         obs = torch.FloatTensor(obs_seq).to(self.device)
         actions = torch.FloatTensor(act_seq).to(self.device)
         rewards = torch.FloatTensor(rew_seq).to(self.device)
-        rewards = torch.clamp(rewards, -150.0, 150.0)
+        rewards = torch.clamp(rewards, -500.0, 500.0)
         next_obs = torch.FloatTensor(nobs_seq).to(self.device)
         dones = torch.FloatTensor(done_seq).to(self.device)
         masks = torch.FloatTensor(mask_seq).to(self.device).squeeze(-1) # (batch, seq)
         
-        burn_in = self.seq_len // 2
+        burn_in = self.seq_len // 4
         masks[:, :burn_in] = 0.0 # Set burn_in steps to 0
         
         actor_hidden = [self.actor.init_hidden(self.batch_size, self.device) for _ in range(self.num_agents)]

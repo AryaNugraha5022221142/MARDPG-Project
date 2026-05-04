@@ -45,7 +45,7 @@ class QuadcopterEnv:
         self.dynamic_ratio = config.get('dynamic_ratio', 0.3)
         self.M = config.get('inner_steps', 10)
         self.cooperative = config.get('cooperative', False)
-        self.rate_limit_per_step = config.get('rate_limit_per_step', 0.5)
+        self.rate_limit_per_step = config.get('rate_limit_per_step', 1.0)
         
         self.arena_diagonal = np.linalg.norm(self.arena_size)
         
@@ -376,20 +376,18 @@ class QuadcopterEnv:
             # Saturation indicator (Bug 14)
             is_saturated = float(getattr(self.agents[i], 'is_saturated', False))
             
-            delta_ranges = ranges_norm - self.prev_ranges_norm[i]
+            agent_id_onehot = np.zeros(self.num_agents, dtype=np.float32)
+            agent_id_onehot[i] = 1.0
             
             obs = np.concatenate([
-                ranges_norm, 
-                delta_ranges,
+                ranges_norm,
                 [dist_norm, np.sin(theta_goal), np.cos(theta_goal), np.sin(phi_goal), np.cos(phi_goal)],
                 vel_norm,
                 [is_saturated],
-                self.prev_actions[i] / 3.5
+                self.prev_actions[i] / 2.5,
+                agent_id_onehot
             ])
             obs_all.append(obs)
-            
-            # Update prev_ranges_norm for the next step
-            self.prev_ranges_norm[i] = ranges_norm
             
         return np.array(obs_all, dtype=np.float32)
 
@@ -451,7 +449,7 @@ class QuadcopterEnv:
         r_smooth_arr = np.zeros(self.num_agents, dtype=np.float32)
         
         # Apply actions only to active agents
-        tracking_errors = []
+        tracking_errors = np.zeros(self.num_agents, dtype=np.float32)
         action_smoothness = []
         min_distances = []
         
@@ -494,14 +492,15 @@ class QuadcopterEnv:
             
             # Record tracking error
             v_ref_world = world_cmd[0:3]
-            tracking_errors.append(np.linalg.norm(v_ref_world - new_vel))
+            tracking_errors[i] = np.linalg.norm(v_ref_world - new_vel)
             
         obs = self._get_observations()
         rewards = np.zeros(self.num_agents, dtype=np.float32)
         info = {'success': False, 'collision': getattr(self, '_episode_collision', False)}
         info['agent_terminated_now'] = np.zeros(self.num_agents, dtype=bool)
         
-        info['tracking_error'] = np.mean(tracking_errors) if tracking_errors else 0.0
+        active_mask = ~self.agent_dones
+        info['tracking_error'] = float(np.mean(tracking_errors[active_mask])) if np.any(active_mask) else 0.0
         info['action_smoothness'] = np.mean(action_smoothness) if action_smoothness else 0.0
         
         sat_rates = [1.0 if getattr(self.agents[i], 'is_saturated', False) else 0.0 for i in range(self.num_agents)]
@@ -527,7 +526,8 @@ class QuadcopterEnv:
             collision_penalty = -5.0 * max(0.0, 1.5 - d_min)**2
             step_penalty = -0.02
             
-            dense_r = r_transfer + action_penalty + collision_penalty + step_penalty
+            tracking_penalty = -0.3 * float(tracking_errors[i]) ** 2
+            dense_r = r_transfer + action_penalty + collision_penalty + step_penalty + tracking_penalty
             
             terminal_bonus = 0.0
             

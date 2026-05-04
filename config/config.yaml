@@ -6,7 +6,7 @@ training:
 
 network:
   actor:
-    hidden_dim: 256       # larger for 34-dim input
+    hidden_dim: 256
     lstm_layers: 1
     dropout: 0.0
   critic:
@@ -20,37 +20,39 @@ learning:
   max_grad_norm: 1.0
 
 memory:
-  buffer_size: 500       # was 2000; with 2000-step eps this is still 1M transitions
+  buffer_size: 500
   batch_size: 32
-  seq_len: 64            # Increased to 64 for longer horizon Temporal info
+  seq_len: 64
 
-update_interval: 50      # was missing (defaulted to 10, too aggressive)
+update_interval: 50
 
 targets:
   update_rate: 0.01
 
 rewards:
   weights:
-    transfer: 2.0
+    transfer: 3.0
     collision: 10.0
     smoothness: 0.01
     step_penalty: 0.05
     free_space: 0.0
+    tracking: 0.3        # NEW — LQR tracking penalty weight
   goal_bonus: 50.0
   collision_penalty: -100.0
 
 environment:
-  arena_size: [30, 30, 15] # Start small
+  arena_size: [30, 30, 15]
   num_obstacles: 0
   max_velocity: 5.0
   rangefinder_max_range: 30.0
   collision_distance: 0.8
   goal_distance: 2.0
   dt: 0.01
-  dynamic_ratio: 0.3
-  max_steps: 2000          # was 1000 — 20 s at dt=0.01
-  obs_dim: 63              # 38 + 25 delta ranges
-  reward_type: "exponential"
+  dynamic_ratio: 0.0       # CHANGED: disable dynamic obstacles until system is stable
+  max_steps: 2000
+  obs_dim: 41              # CHANGED: 38 base + 3 agent-id (or 38 if skipping Fix 12)
+  reward_type: "linear"
+  rate_limit_per_step: 1.0  # CHANGED: increased from 0.5
 
 logging:
   log_dir: "logs"

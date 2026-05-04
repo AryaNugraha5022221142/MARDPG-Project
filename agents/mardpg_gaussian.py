@@ -13,7 +13,7 @@ class UncorrelatedGaussianNoise:
     """
     Uncorrelated Gaussian Noise with annealing.
     """
-    def __init__(self, action_dim, sigma_start=1.2, sigma_end=0.15, total_steps=3_000_000):
+    def __init__(self, action_dim, sigma_start=1.2, sigma_end=0.20, total_steps=10_000_000):
         self.sigma = sigma_start
         self.sigma_end = sigma_end
         self.decay = (sigma_start - sigma_end) / total_steps
@@ -103,7 +103,7 @@ class MARDPG_Gaussian:
                     action += self.noise[i].sample()
                     self.noise[i].step() # decay exploration noise
                 
-                action = np.clip(action, -3.5, 3.5)
+                action = np.clip(action, -2.5, 2.5)
                 actions.append(action)
                 
                 if i == 0:
@@ -136,12 +136,12 @@ class MARDPG_Gaussian:
         obs = torch.FloatTensor(obs_seq).to(self.device)
         actions = torch.FloatTensor(act_seq).to(self.device)
         rewards = torch.FloatTensor(rew_seq).to(self.device)
-        rewards = torch.clamp(rewards, -150.0, 150.0)
+        rewards = torch.clamp(rewards, -500.0, 500.0)
         next_obs = torch.FloatTensor(nobs_seq).to(self.device)
         dones = torch.FloatTensor(done_seq).to(self.device)
         masks = torch.FloatTensor(mask_seq).to(self.device).squeeze(-1)
         
-        burn_in = self.seq_len // 2
+        burn_in = self.seq_len // 4
         masks[:, :burn_in] = 0.0
         
         actor_hidden = [self.actor.init_hidden(self.batch_size, self.device) for _ in range(self.num_agents)]
