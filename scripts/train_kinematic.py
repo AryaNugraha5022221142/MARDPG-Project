@@ -126,7 +126,7 @@ def main():
     # Agent-count curriculum schedule: thresholds based on competency
     agent_grad_success_threshold = {1: 0.65, 2: 0.60, 3: 0.55, 4: 0.50, 5: 0.48}
     agent_grad_collision_threshold = {1: 0.20, 2: 0.22, 3: 0.25, 4: 0.28, 5: 0.30}
-    current_num_agents = 1
+    current_num_agents = 2
     episodes_at_agent_level = 0
     target_max_agents = config['training']['num_agents']
     
@@ -147,13 +147,13 @@ def main():
 
     warmup_until = 0
 
-    # Re-create env and agent with 1 agent to start
-    env_config_1 = env_config.copy()
-    env = QuadcopterKinematicEnv(num_agents=1, config=env_config_1,
+    # Re-create env and agent with starting agents
+    env_config_start = env_config.copy()
+    env = QuadcopterKinematicEnv(num_agents=current_num_agents, config=env_config_start,
                         render_mode='human' if args.render else None,
                         scenario=args.scenario)
     env.set_curriculum_level(curriculum_level)
-    agent = _make_agent(args.agent, obs_dim, 2, 1, config, device)
+    agent = _make_agent(args.agent, obs_dim, 2, current_num_agents, config, device)
     
     # Academic Data Tracking
     reward_history = []
