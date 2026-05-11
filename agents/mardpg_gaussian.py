@@ -64,6 +64,12 @@ class MARDPG_Gaussian:
             output_dim=action_dim,
             num_agents=num_agents
         ).to(self.device)
+        
+        assert len(self.actor.output_heads) == self.num_agents, (
+            f"Actor has {len(self.actor.output_heads)} heads, "
+            f"but num_agents={self.num_agents}"
+        )
+        
         self.actor_target = copy.deepcopy(self.actor).to(self.device)
         
         # Centralized Critics (one per agent, but each sees all agents)
