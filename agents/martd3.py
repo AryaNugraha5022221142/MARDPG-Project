@@ -65,7 +65,13 @@ class MARTD3:
         hidden_dim = config['network']['actor'].get('hidden_dim', 128)
         lstm_layers = config['network']['actor'].get('lstm_layers', 1)
         
-        self.actor = ActorLSTM(obs_dim, hidden_dim, lstm_layers, action_dim).to(self.device)
+        self.actor = ActorLSTM(
+            input_dim=obs_dim,
+            hidden_dim=hidden_dim,
+            num_layers=lstm_layers,
+            output_dim=action_dim,
+            num_agents=num_agents
+        ).to(self.device)
         self.actor_target = copy.deepcopy(self.actor).to(self.device)
         
         # Centralized Critics (one per agent, two per agent for TD3 style twin critics)

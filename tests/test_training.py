@@ -2,7 +2,7 @@
 import pytest
 import numpy as np
 import torch
-from agents import MARDPG
+from agents import MARDPG, MARTD3, MARDPG_Gaussian
 from envs import QuadcopterEnv
 
 def test_buffer():
@@ -71,3 +71,37 @@ def test_network_update():
     assert 'critic_loss' in loss_dict
     assert isinstance(loss_dict['actor_loss'], float)
     assert isinstance(loss_dict['critic_loss'], float)
+
+@pytest.mark.parametrize("agent_cls, critic_attr", [
+    (MARDPG, "critics"),
+    (MARDPG_Gaussian, "critics"),
+    (MARTD3, "critics_1"),
+])
+@pytest.mark.parametrize("num_agents", [1, 3, 6])
+def test_recurrent_agents_support_variable_agent_counts(agent_cls, critic_attr, num_agents):
+    obs_dim = 34
+    action_dim = 4
+    agent = agent_cls(
+        obs_dim=obs_dim,
+        action_dim=action_dim,
+        num_agents=num_agents,
+        device="cpu",
+    )
+
+    assert len(agent.actor.output_heads) == num_agents
+
+    obs = np.random.randn(num_agents, obs_dim).astype(np.float32)
+    actor_hidden = [agent.actor.init_hidden(1, "cpu") for _ in range(num_agents)]
+    critics = getattr(agent, critic_attr)
+    critic_hidden = [critics[i].init_hidden(1, "cpu") for i in range(num_agents)]
+
+    actions, new_actor_hidden, new_critic_hidden = agent.select_actions(
+        obs,
+        actor_hidden,
+        critic_hidden,
+        explore=False,
+    )
+
+    assert actions.shape == (num_agents, action_dim)
+    assert len(new_actor_hidden) == num_agents
+    assert len(new_critic_hidden) == num_agents
