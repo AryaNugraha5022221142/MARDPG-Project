@@ -52,6 +52,7 @@ class MARDPG_Gaussian:
         self.batch_size = config['memory'].get('batch_size', 32)
         self.seq_len = config['memory'].get('seq_len', 16)
         self.max_grad_norm = config['learning'].get('max_grad_norm', 1.0)
+        self.action_bound = float(config.get('environment', {}).get('action_bound', 2.5))
         
         # Shared Actor
         hidden_dim = config['network']['actor'].get('hidden_dim', 128)
@@ -62,7 +63,8 @@ class MARDPG_Gaussian:
             hidden_dim=hidden_dim,
             num_layers=lstm_layers,
             output_dim=action_dim,
-            num_agents=num_agents
+            num_agents=num_agents,
+            action_limit=self.action_bound,
         ).to(self.device)
         
         assert len(self.actor.output_heads) == self.num_agents, (
@@ -115,7 +117,7 @@ class MARDPG_Gaussian:
                     action += self.noise[i].sample()
                     self.noise[i].step() # decay exploration noise
                 
-                action = np.clip(action, -2.5, 2.5)
+                action = np.clip(action, -self.action_bound, self.action_bound)
                 actions.append(action)
                 
                 if i == 0:

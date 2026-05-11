@@ -48,6 +48,7 @@ class QuadcopterEnv:
         self.cooperative = config.get('cooperative', False)
         self.rate_limit_per_step = config.get('rate_limit_per_step', 1.0)
         self.action_bound = float(config.get('action_bound', 2.5))
+        self.max_yaw_rate_deg = float(config.get('max_yaw_rate_deg', 45.0))
         self.agent_id_dim = int(config.get('agent_id_dim', self.num_agents))
         self.obs_dim = 25 + 5 + 3 + 1 + 4 + self.agent_id_dim
         
@@ -467,6 +468,7 @@ class QuadcopterEnv:
         # Action scaling
         jerk_arr = np.zeros(self.num_agents, dtype=np.float32)
         r_smooth_arr = np.zeros(self.num_agents, dtype=np.float32)
+        action_penalties = np.zeros(self.num_agents, dtype=np.float32)
         
         # Apply actions only to active agents
         tracking_errors = np.zeros(self.num_agents, dtype=np.float32)
@@ -476,24 +478,33 @@ class QuadcopterEnv:
         for i in range(self.num_agents):
             if self.agent_dones[i]: continue
             
-            action = actions[i]
-            
-            # Action smoothness metric
+            action = np.clip(
+                np.asarray(actions[i], dtype=np.float32).copy(),
+                -self.action_bound,
+                self.action_bound,
+            )
+            prev_action = self.prev_actions[i].copy()
+
+            delta_action = action - prev_action
+            if np.any(np.abs(delta_action) > self.rate_limit_per_step):
+                action = prev_action + np.clip(
+                    delta_action,
+                    -self.rate_limit_per_step,
+                    self.rate_limit_per_step,
+                )
+
+            applied_delta = action - prev_action
             if self.step_count > 1:
-                action_smoothness.append(np.linalg.norm(action - self.prev_actions[i]))
-            
-            # Rate-of-change limiting (Bug 13)
-            delta = np.abs(action - self.prev_actions[i])
-            if np.any(delta > self.rate_limit_per_step):
-                action = self.prev_actions[i] + np.clip(action - self.prev_actions[i], -self.rate_limit_per_step, self.rate_limit_per_step)
-            
-            r_smooth_arr[i] = -self.reward_config.get('weights', {}).get('smoothness', 0.01) * np.sum((action - self.prev_actions[i])**2)
+                action_smoothness.append(np.linalg.norm(applied_delta))
+
+            smooth_weight = self.reward_config.get('weights', {}).get('smoothness', 0.01)
+            action_penalties[i] = -smooth_weight * np.sum(applied_delta**2)
+            r_smooth_arr[i] = action_penalties[i]
             self.prev_actions[i] = action.copy()
             
-            # Network already outputs in [-3.5, 3.5]; do NOT rescale again.
+            # Network outputs within [-action_bound, action_bound]
             vx_cmd, vy_cmd, vz_cmd = action[0], action[1], action[2]
-            # Yaw: network outputs [-3.5, 3.5]; scale so max = pi/4 rad/s ~ 45 deg/s:
-            yaw_rate_cmd = action[3] * (45.0 / 3.5)     # stays under thesis bound
+            yaw_rate_cmd = (action[3] / self.action_bound) * self.max_yaw_rate_deg
             
             yaw = self.agents[i].state[5]
             vx_world = vx_cmd * np.cos(yaw) - vy_cmd * np.sin(yaw)
@@ -545,9 +556,7 @@ class QuadcopterEnv:
             min_distances.append(d_min)
             
             # Action penalty
-            a_t = actions[i]
-            a_prev = self.prev_actions[i]
-            action_penalty = -0.01 * np.sum((a_t - a_prev)**2)
+            action_penalty = action_penalties[i]
 
             # Store the old distance before updating
             old_dist_to_goal = self.prev_dist_to_goal[i]
@@ -625,7 +634,7 @@ class QuadcopterEnv:
             rewards[:] = team_r
 
         # Global termination
-        terminated = np.all(self.agent_dones)
+        terminated = bool(np.all(self.agent_dones))
         if self.scenario == 'search_and_rescue' and len(self.targets_claimed) == len(self.sar_targets):
             terminated = True
             info['success'] = True
@@ -640,7 +649,7 @@ class QuadcopterEnv:
         info['agent_success'] = np.array([self.agent_dones[i] and np.linalg.norm(self.agents[i].state[0:3] - self.goals[i]) < self.goal_dist for i in range(self.num_agents)], dtype=bool)
         info['agent_collision'] = self.agent_dones & ~info['agent_success']
         
-        truncated = self.step_count >= self.max_steps
+        truncated = bool(self.step_count >= self.max_steps)
         self.last_info = info
         return obs, rewards, terminated, truncated, info
 

@@ -50,12 +50,13 @@ class MultiUAVGymEnv(gym.Env):
         )
 
         # Obs dim per agent: 25 (rangefinder) + 5 (goal) + 3 (vel) + 1 (is_sat) + 4 (prev_act) = 38
-        self.obs_dim_per_agent = 38
+        self.obs_dim_per_agent = self._env.obs_dim
         total_obs_dim = self.obs_dim_per_agent * num_agents
+        self.action_bound = float(getattr(self._env, "action_bound", 2.5))
 
         # Single-agent interface: all agents' observations concatenated
         self.observation_space = spaces.Box(
-            low=0.0,
+            low=-1.0,
             high=1.0,
             shape=(total_obs_dim,),
             dtype=np.float32,
@@ -63,8 +64,8 @@ class MultiUAVGymEnv(gym.Env):
 
         # Actions: 4 dims per agent, all in [-1, 1]
         self.action_space = spaces.Box(
-            low=-1.0,
-            high=1.0,
+            low=-self.action_bound,
+            high=self.action_bound,
             shape=(num_agents * 4,),
             dtype=np.float32,
         )

@@ -49,12 +49,20 @@ class MADDPG:
         self.tau = config['targets'].get('update_rate', 0.01)
         self.batch_size = config['memory'].get('batch_size', 128)
         self.max_grad_norm = config['learning'].get('max_grad_norm', 1.0)
+        self.action_bound = float(config.get('environment', {}).get('action_bound', 2.5))
         
         # Shared Actor
         hidden_dim = config['network']['actor'].get('hidden_dim', 256)
         dropout = config['network'].get('dropout', 0.2)
         
-        self.actor = Actor(obs_dim, hidden_dim, action_dim, dropout=dropout).to(self.device)
+        self.actor = Actor(
+            input_dim=obs_dim,
+            hidden_dim=hidden_dim,
+            output_dim=action_dim,
+            dropout=dropout,
+            num_agents=num_agents,
+            action_limit=self.action_bound,
+        ).to(self.device)
         self.actor_target = copy.deepcopy(self.actor).to(self.device)
         
         # Critics (one per agent)
@@ -92,7 +100,7 @@ class MADDPG:
                     action += self.noise[i].sample()
                     self.noise[i].step()
                 
-                action = np.clip(action, -3.5, 3.5)
+                action = np.clip(action, -self.action_bound, self.action_bound)
                 
                 actions.append(action)
                 

@@ -452,6 +452,7 @@ class QuadcopterKinematicEnv:
         # Action scaling
         jerk_arr = np.zeros(self.num_agents, dtype=np.float32)
         r_smooth_arr = np.zeros(self.num_agents, dtype=np.float32)
+        action_penalties = np.zeros(self.num_agents, dtype=np.float32)
         
         # Apply actions only to active agents
         tracking_errors = np.zeros(self.num_agents, dtype=np.float32)
@@ -461,18 +462,28 @@ class QuadcopterKinematicEnv:
         for i in range(self.num_agents):
             if self.agent_dones[i]: continue
             
-            action = actions[i]
-            
-            # Action smoothness metric
+            action = np.clip(
+                np.asarray(actions[i], dtype=np.float32).copy(),
+                -self.action_bound,
+                self.action_bound,
+            )
+            prev_action = self.prev_actions[i].copy()
+
+            delta_action = action - prev_action
+            if np.any(np.abs(delta_action) > self.rate_limit_per_step):
+                action = prev_action + np.clip(
+                    delta_action,
+                    -self.rate_limit_per_step,
+                    self.rate_limit_per_step,
+                )
+
+            applied_delta = action - prev_action
             if self.step_count > 1:
-                action_smoothness.append(np.linalg.norm(action - self.prev_actions[i]))
-            
-            # Rate-of-change limiting (Bug 13)
-            delta = np.abs(action - self.prev_actions[i])
-            if np.any(delta > self.rate_limit_per_step):
-                action = self.prev_actions[i] + np.clip(action - self.prev_actions[i], -self.rate_limit_per_step, self.rate_limit_per_step)
-            
-            r_smooth_arr[i] = -self.reward_config.get('weights', {}).get('smoothness', 0.01) * np.sum((action - self.prev_actions[i])**2)
+                action_smoothness.append(np.linalg.norm(applied_delta))
+
+            smooth_weight = self.reward_config.get('weights', {}).get('smoothness', 0.01)
+            action_penalties[i] = -smooth_weight * np.sum(applied_delta**2)
+            r_smooth_arr[i] = action_penalties[i]
             self.prev_actions[i] = action.copy()
             
             old_vel = self.agents[i].state[6:9].copy()
@@ -523,9 +534,7 @@ class QuadcopterKinematicEnv:
             min_distances.append(d_min)
             
             # Action penalty
-            a_t = actions[i]
-            a_prev = self.prev_actions[i]
-            action_penalty = -0.01 * np.sum((a_t - a_prev)**2)
+            action_penalty = action_penalties[i]
 
             # Store the old distance before updating
             old_dist_to_goal = self.prev_dist_to_goal[i]
@@ -603,7 +612,7 @@ class QuadcopterKinematicEnv:
             rewards[:] = team_r
 
         # Global termination
-        terminated = np.all(self.agent_dones)
+        terminated = bool(np.all(self.agent_dones))
         if self.scenario == 'search_and_rescue' and len(self.targets_claimed) == len(self.sar_targets):
             terminated = True
             info['success'] = True
@@ -618,7 +627,7 @@ class QuadcopterKinematicEnv:
         info['agent_success'] = np.array([self.agent_dones[i] and np.linalg.norm(self.agents[i].state[0:3] - self.goals[i]) < self.goal_dist for i in range(self.num_agents)], dtype=bool)
         info['agent_collision'] = self.agent_dones & ~info['agent_success']
         
-        truncated = self.step_count >= self.max_steps
+        truncated = bool(self.step_count >= self.max_steps)
         self.last_info = info
         return obs, rewards, terminated, truncated, info
 

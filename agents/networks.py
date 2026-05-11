@@ -9,11 +9,21 @@ class ActorLSTM(nn.Module):
     LSTM-based Actor network shared across all agents.
     Outputs continuous actions in [-3.5, 3.5].
     """
-    def __init__(self, input_dim: int = 38, hidden_dim: int = 128, num_layers: int = 1, output_dim: int = 4, dropout: float = 0.1, num_agents: int = 3):
+    def __init__(
+        self,
+        input_dim: int = 38,
+        hidden_dim: int = 128,
+        num_layers: int = 1,
+        output_dim: int = 4,
+        dropout: float = 0.1,
+        num_agents: int = 3,
+        action_limit: float = 2.5,
+    ):
         super(ActorLSTM, self).__init__()
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
         self.num_agents = num_agents
+        self.action_limit = float(action_limit)
         
         self.fc_embed = nn.Linear(input_dim, hidden_dim)  # Eq. 3.25
         self.lstm = nn.LSTM(hidden_dim, hidden_dim, num_layers, batch_first=True)
@@ -45,7 +55,7 @@ class ActorLSTM(nn.Module):
         # Process all time steps for sequence training
         x = F.relu(self.fc1(out))
         x = F.relu(self.fc2(x))
-        actions = 3.5 * torch.tanh(self.output_heads[agent_idx](x))
+        actions = self.action_limit * torch.tanh(self.output_heads[agent_idx](x))
         
         if is_single_step:
             actions = actions.squeeze(1)
@@ -107,9 +117,18 @@ class Actor(nn.Module):
     Standard MLP-based Actor network shared across all agents.
     Outputs continuous actions in [-1, 1].
     """
-    def __init__(self, input_dim: int = 38, hidden_dim: int = 256, output_dim: int = 4, dropout: float = 0.2, num_agents: int = 3):
+    def __init__(
+        self,
+        input_dim: int = 38,
+        hidden_dim: int = 256,
+        output_dim: int = 4,
+        dropout: float = 0.2,
+        num_agents: int = 3,
+        action_limit: float = 2.5,
+    ):
         super(Actor, self).__init__()
         self.num_agents = num_agents
+        self.action_limit = float(action_limit)
         
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.dropout1 = nn.Dropout(dropout)
@@ -126,7 +145,7 @@ class Actor(nn.Module):
         x = self.dropout1(x)
         x = F.relu(self.fc2(x))
         x = self.dropout2(x)
-        actions = 3.5 * torch.tanh(self.output_heads[agent_idx](x))
+        actions = self.action_limit * torch.tanh(self.output_heads[agent_idx](x))
         
         return actions
 
