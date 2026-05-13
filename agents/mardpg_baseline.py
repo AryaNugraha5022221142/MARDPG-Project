@@ -14,14 +14,14 @@ class ActorLSTMBaseline(nn.Module):
     - CNN for 25 rangefinders
     - FC for state vector
     - Fusion into LSTM
-    - Softmax output to produce 2 continuous steering signals [-pi/6, pi/6]
-    - Finally mapped to 4D to be compatible with quadcopter_env
+    - Tanh output to produce 2 continuous steering signals [rho, tau]
+    - Actions are scaled to [-action_bound, action_bound] for the kinematic env
     """
-    def __init__(self, obs_dim_total: int, hidden_dim: int = 128, device: str = 'cpu', action_limit: float = 2.5, max_yaw_rate_deg: float = 45.0):
+    def __init__(self, obs_dim_total: int, hidden_dim: int = 128, device: str = 'cpu', action_bound: float = 2.5):
         super().__init__()
         self.device = device
-        self.action_limit = action_limit
-        self.max_yaw_rate_deg = max_yaw_rate_deg
+        self.hidden_dim = hidden_dim
+        self.action_bound = action_bound
         
         # Rangefinders (25 values) -> CNN
         # Input shape: (batch*seq, 1, 25)
@@ -38,12 +38,12 @@ class ActorLSTMBaseline(nn.Module):
         self.lstm = nn.LSTM(self.fusion_dim, hidden_dim, num_layers=1, batch_first=True)
         
         # Output layer with tanh
-        # We output 2 signals: p (yaw) and tau (pitch)
+        # We output 2 steering signals: rho (yaw) and tau (pitch)
         self.output_head = nn.Linear(hidden_dim, 2)
 
     def init_hidden(self, batch_size: int = 1, device: str = 'cpu'):
-        h0 = torch.zeros(1, batch_size, 128).to(device)
-        c0 = torch.zeros(1, batch_size, 128).to(device)
+        h0 = torch.zeros(1, batch_size, self.hidden_dim).to(device)
+        c0 = torch.zeros(1, batch_size, self.hidden_dim).to(device)
         return (h0, c0)
 
     def forward(self, x: torch.Tensor, hidden: Tuple[torch.Tensor, torch.Tensor] = None):
@@ -76,30 +76,16 @@ class ActorLSTMBaseline(nn.Module):
         logits = self.output_head(out)
         norm_out = torch.tanh(logits) # (batch, seq, 2)
         
-        # Action steering in [-pi/6, pi/6]
-        steering = norm_out * (np.pi / 6.0)
-        p = steering[:, :, 0]   # yaw steering (rate)
-        tau = steering[:, :, 1] # pitch steering (elevation angle)
-        
-        # Constant velocity assumption
-        v = 2.0 
-        vx_cmd = v * torch.cos(tau)
-        vy_cmd = torch.zeros_like(vx_cmd) # Assume no side slip
-        vz_cmd = v * torch.sin(tau)
-        
-        # To invert the env's yaw scaling: yaw_rate_cmd = action[3] * (max_yaw_rate_deg / action_limit)
-        # We need action[3] * (max_yaw_rate_deg / action_limit) = p
-        # action[3] = p * (action_limit / max_yaw_rate_deg)
-        yaw_rate_inverted = p * (self.action_limit / self.max_yaw_rate_deg)
-        
-        actions = torch.stack([vx_cmd, vy_cmd, vz_cmd, yaw_rate_inverted], dim=-1)
+        actions = self.action_bound * norm_out
+        rho = actions[:, :, 0]
+        tau = actions[:, :, 1]
         
         if is_single_step:
             actions = actions.squeeze(1)
-            p = p.squeeze(1)
+            rho = rho.squeeze(1)
             tau = tau.squeeze(1)
             
-        return actions, hidden, out, (p, tau)
+        return actions, hidden, out, (rho, tau)
 
 
 class MultiActorLSTMBaseline(nn.Module):
@@ -107,10 +93,10 @@ class MultiActorLSTMBaseline(nn.Module):
     Wraps multiple independent ActorLSTMBaseline modules to maintain compatibility
     with external scripts that expect a single 'agent.actor' object.
     """
-    def __init__(self, obs_dim_total: int, num_agents: int = 3, hidden_dim: int = 128, device: str = 'cpu', action_limit: float = 2.5, max_yaw_rate_deg: float = 45.0):
+    def __init__(self, obs_dim_total: int, num_agents: int = 3, hidden_dim: int = 128, device: str = 'cpu', action_bound: float = 2.5):
         super().__init__()
         self.num_agents = num_agents
-        self.models = nn.ModuleList([ActorLSTMBaseline(obs_dim_total, hidden_dim, device, action_limit, max_yaw_rate_deg) for _ in range(num_agents)])
+        self.models = nn.ModuleList([ActorLSTMBaseline(obs_dim_total, hidden_dim, device, action_bound) for _ in range(num_agents)])
         
     def init_hidden(self, batch_size: int = 1, device: str = 'cpu'):
         return self.models[0].init_hidden(batch_size, device)
@@ -123,7 +109,7 @@ class CriticLSTMBaseline(nn.Module):
     Centralized Critic network.
     Takes joint observations and joint actions directly.
     """
-    def __init__(self, obs_dim: int, action_dim: int = 4, num_agents: int = 3, hidden_dim: int = 128):
+    def __init__(self, obs_dim: int, action_dim: int = 2, num_agents: int = 3, hidden_dim: int = 128):
         super().__init__()
         self.num_layers = 1
         self.hidden_dim = hidden_dim
@@ -159,10 +145,10 @@ class MARDPG_Baseline:
     """
     MARDPG Baseline Implementation (as specified)
     """
-    def __init__(self, obs_dim: int = 41, action_dim: int = 4, num_agents: int = 3, 
+    def __init__(self, obs_dim: int = 41, action_dim: int = 2, num_agents: int = 3, 
                  config: Dict[str, Any] = None, device: str = 'cpu', independent_critics: bool = False):
         self.obs_dim = obs_dim
-        self.action_dim = action_dim # Env action dim is 4 (vx, vy, vz, yaw)
+        self.action_dim = action_dim # Kinematic env action dim is 2: [rho, tau]
         self.num_agents = num_agents
         self.device = device
         
@@ -182,14 +168,15 @@ class MARDPG_Baseline:
         self.max_grad_norm = config['learning'].get('max_grad_norm', 1.0)
         
         self.action_bound = float(config.get('environment', {}).get('action_bound', 2.5))
-        self.max_yaw_rate_deg = float(config.get('environment', {}).get('max_yaw_rate_deg', 45.0))
         
         hidden_dim = config['network']['actor'].get('hidden_dim', 128)
         
-        self.actor = MultiActorLSTMBaseline(obs_dim, num_agents, hidden_dim, device, self.action_bound, self.max_yaw_rate_deg).to(self.device)
+        self.actor = MultiActorLSTMBaseline(obs_dim, num_agents, hidden_dim, device, self.action_bound).to(self.device)
         self.actor_target = copy.deepcopy(self.actor).to(self.device)
         
-        self.critics = [CriticLSTMBaseline(obs_dim, action_dim, num_agents, hidden_dim).to(self.device) for _ in range(num_agents)]
+        critic_hidden_dim = config['network'].get('critic', {}).get('hidden_dim', hidden_dim)
+        
+        self.critics = [CriticLSTMBaseline(obs_dim, action_dim, num_agents, critic_hidden_dim).to(self.device) for _ in range(num_agents)]
         self.critics_target = [copy.deepcopy(c).to(self.device) for c in self.critics]
         
         actor_lr = config['learning'].get('actor_lr', 1e-4)
@@ -217,35 +204,16 @@ class MARDPG_Baseline:
                 obs_tensor = torch.FloatTensor(obs[i]).unsqueeze(0).to(self.device)
                 h, c = actor_hidden[i]
                 
-                action, (new_h, new_c), h_seq, (p_val, tau_val) = self.actor(obs_tensor, (h, c), agent_idx=i)
+                action, (new_h, new_c), _, _ = self.actor(obs_tensor, (h, c), agent_idx=i)
                 new_actor_hidden.append((new_h, new_c))
                 
-                # Extract the 2D steering signal (p and tau)
-                p_np = p_val.cpu().numpy().item()
-                tau_np = tau_val.cpu().numpy().item()
+                action_np = action.cpu().numpy().flatten()
                 
                 if explore:
-                    # epsilon exploration
-                    p_np += np.random.normal(0, 0.1)
-                    tau_np += np.random.normal(0, 0.1)
+                    action_np += np.random.normal(0, 0.1, size=self.action_dim)
                     
-                    # Clip to bounds [-pi/6, pi/6]
-                    p_np = np.clip(p_np, -np.pi/6.0, np.pi/6.0)
-                    tau_np = np.clip(tau_np, -np.pi/6.0, np.pi/6.0)
-                
-                # Manual map of steering to 4D action space for env (identical to Actor logic)
-                v = 2.0 
-                vx_cmd = v * np.cos(tau_np)
-                vy_cmd = 0.0
-                vz_cmd = v * np.sin(tau_np)
-                yaw_rate_cmd_inverted = p_np * (self.action_bound / self.max_yaw_rate_deg)
-                
-                action_np = np.array([vx_cmd, vy_cmd, vz_cmd, yaw_rate_cmd_inverted], dtype=np.float32)
-                actions.append(action_np)
-                
-                if i == 0:
-                    actor_hiddens = []
-                actor_hiddens.append(h_seq)
+                action_np = np.clip(action_np, -self.action_bound, self.action_bound)
+                actions.append(action_np.astype(np.float32))
             
             actions_np = np.array(actions)
             actions_tensor = torch.FloatTensor(actions_np).unsqueeze(0).unsqueeze(0).to(self.device)
