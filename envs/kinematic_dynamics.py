@@ -8,28 +8,33 @@ class KinematicDynamics:
     def __init__(self, dt: float = 0.01, v: float = 2.0):
         self.dt = dt
         self.v = v
-        # State: [x, y, z, phi, theta, psi, vx, vy, vz, omega_x, omega_y, omega_z]
-        # We maintain the 12-dim state shape so that ray_intersect and other env logic survives,
-        # but we only actively update [0:3] and heading [4] (pitch=theta) / [5] (yaw=psi).
+        # State: [x, y, z, roll(phi), pitch(theta), yaw(psi), vx, vy, vz, p, q, r]
+        # Paper mapping: vartheta = horizontal/yaw angle -> state[5] (psi)
+        # Paper mapping: varphi = vertical/elevation angle -> state[4] (theta)
         self.state = np.zeros(12, dtype=np.float32)
 
     def reset(self, start_pos: np.ndarray, start_yaw: float = 0.0):
         self.state = np.zeros(12, dtype=np.float32)
         self.state[0:3] = start_pos
-        self.state[5] = start_yaw  # psi (yaw, phi in prompt)
-        self.state[4] = 0.0        # theta (pitch, vartheta in prompt)
+        self.state[5] = start_yaw  # psi/yaw = paper vartheta
+        self.state[4] = 0.0        # theta/pitch = paper varphi
+        self.state[6] = self.v * np.cos(self.state[4]) * np.cos(self.state[5])
+        self.state[7] = self.v * np.cos(self.state[4]) * np.sin(self.state[5])
+        self.state[8] = self.v * np.sin(self.state[4])
+        return self.state.copy()
 
     def rl_step(self, action: np.ndarray, lqr=None, M: int = 1):
         """
-        action: [yaw_rate, pitch_rate] in rad/s.
+        action: [rho, tau] steering signals as angular rates in rad/s.
+        rho updates horizontal/yaw angle; tau updates vertical/pitch angle.
         M: number of inner simulation ticks represented by one outer RL step.
         """
-        yaw_rate = float(action[0])
-        pitch_rate = float(action[1])
+        rho = float(action[0])
+        tau = float(action[1])
         control_dt = self.dt * M
 
-        self.state[5] += yaw_rate * control_dt
-        self.state[4] += pitch_rate * control_dt
+        self.state[5] += rho * control_dt
+        self.state[4] += tau * control_dt
 
         self.state[5] = (self.state[5] + np.pi) % (2 * np.pi) - np.pi
         self.state[4] = np.clip(self.state[4], -np.pi / 2, np.pi / 2)
@@ -49,7 +54,8 @@ class KinematicDynamics:
         self.state[1] += vy * control_dt
         self.state[2] += vz * control_dt
 
-        self.state[10] = pitch_rate
-        self.state[11] = yaw_rate
+        self.state[9] = 0.0
+        self.state[10] = tau
+        self.state[11] = rho
 
         return self.state.copy()
