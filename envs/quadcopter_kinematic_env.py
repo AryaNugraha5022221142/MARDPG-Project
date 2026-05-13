@@ -53,8 +53,9 @@ class QuadcopterKinematicEnv:
         self.obs_dim = 25 + 5 + 3 + 1 + 2 + self.agent_id_dim
         
         self.arena_diagonal = np.linalg.norm(self.arena_size)
+        self.constant_velocity = float(config.get('constant_velocity', 2.0))
         
-        self.agents = [KinematicDynamics(dt=self.dt, v=2.0) for _ in range(self.num_agents)]
+        self.agents = [KinematicDynamics(dt=self.dt, v=self.constant_velocity) for _ in range(self.num_agents)]
         
         # Dynamic goals based on arena size
         self.goals = np.zeros((self.num_agents, 3), dtype=np.float32)
@@ -273,13 +274,14 @@ class QuadcopterKinematicEnv:
             # Yaw measurement noise Eq. 3.43: \hat{\psi}_i(t) = \psi_i(t) + \mathcal{N}(0, \sigma_\psi^2)
             yaw_gt = state[5]
             yaw = yaw_gt + np.random.normal(0, self.yaw_noise_std)
+            pitch = state[4]
             
             goal = self.goals[i]
             
             # 1. Vectorized Rangefinder
             # Ray directions in world frame: (25, 3)
             ray_yaws = yaw + ha_flat
-            ray_pitches = va_flat
+            ray_pitches = np.clip(pitch + va_flat, -np.pi / 2, np.pi / 2)
             
             dir_vecs = np.stack([
                 np.cos(ray_pitches) * np.cos(ray_yaws),
@@ -369,12 +371,18 @@ class QuadcopterKinematicEnv:
             dist_to_goal = np.linalg.norm(rel_pos)
             dist_norm = dist_to_goal / self.arena_diagonal
             theta_goal = np.arctan2(rel_pos[1], rel_pos[0]) - yaw
-            phi_goal = np.arctan2(rel_pos[2], np.sqrt(rel_pos[0]**2 + rel_pos[1]**2))
+            theta_goal = (theta_goal + np.pi) % (2 * np.pi) - np.pi
+            goal_pitch = np.arctan2(rel_pos[2], np.sqrt(rel_pos[0]**2 + rel_pos[1]**2))
+            phi_goal = goal_pitch - pitch
             
             cos_y, sin_y = np.cos(yaw), np.sin(yaw)
-            vx_body = state[6] * cos_y + state[7] * sin_y
+            cos_p, sin_p = np.cos(pitch), np.sin(pitch)
+
+            v_forward = state[6] * cos_y + state[7] * sin_y
+            vx_body = cos_p * v_forward + sin_p * state[8]
             vy_body = -state[6] * sin_y + state[7] * cos_y
-            vz_body = state[8]
+            vz_body = -sin_p * v_forward + cos_p * state[8]
+
             vel_norm = np.clip(np.array([vx_body, vy_body, vz_body]) / 5.0, -1.0, 1.0)
             
             # Saturation indicator (Bug 14)
@@ -425,8 +433,15 @@ class QuadcopterKinematicEnv:
     def step(self, actions: np.ndarray) -> Tuple[np.ndarray, np.ndarray, bool, bool, Dict[str, Any]]:
         """
         Executes one environment step with per-agent termination.
-        actions: (num_agents, 4) in range [-1, 1]
+        actions: (num_agents, 2) steering signals [rho, tau] in [-action_bound, action_bound]
         """
+        actions = np.asarray(actions, dtype=np.float32)
+        if self.num_agents == 1 and actions.shape == (2,):
+            actions = actions.reshape(1, 2)
+        if actions.shape != (self.num_agents, 2):
+            raise ValueError(f"actions must have shape ({self.num_agents}, 2), got {actions.shape}")
+        actions = np.clip(actions, -self.action_bound, self.action_bound)
+
         self.step_count += 1
         
         # Update dynamic obstacles
@@ -462,11 +477,7 @@ class QuadcopterKinematicEnv:
         for i in range(self.num_agents):
             if self.agent_dones[i]: continue
             
-            action = np.clip(
-                np.asarray(actions[i], dtype=np.float32).copy(),
-                -self.action_bound,
-                self.action_bound,
-            )
+            action = actions[i].copy()
             prev_action = self.prev_actions[i].copy()
 
             delta_action = action - prev_action
@@ -482,13 +493,13 @@ class QuadcopterKinematicEnv:
                 action_smoothness.append(np.linalg.norm(applied_delta))
 
             smooth_weight = self.reward_config.get('weights', {}).get('smoothness', 0.01)
-            action_penalties[i] = -smooth_weight * np.sum(applied_delta**2)
-            r_smooth_arr[i] = action_penalties[i]
+            action_penalties[i] = -0.01 * np.sum(applied_delta**2)
+            r_smooth_arr[i] = -smooth_weight * np.sum(applied_delta**2)
             self.prev_actions[i] = action.copy()
             
             old_vel = self.agents[i].state[6:9].copy()
             
-            # Kinematic update: action is [p, tau]
+            # Kinematic update: action is [rho, tau]
             yaw_rate = action[0] * (self.max_yaw_rate / self.action_bound)
             pitch_rate = action[1] * (self.max_pitch_rate / self.action_bound)
             steering_rates = np.array([yaw_rate, pitch_rate], dtype=np.float32)
