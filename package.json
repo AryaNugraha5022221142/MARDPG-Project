@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
-    "dev": "python3 -m http.server 3000",
+    "dev": "python3 scripts/generate_scene_previews.py && cd static && python3 -m http.server 3000",
     "clean": "rm -rf dist"
   }
 }

@@ -855,8 +855,11 @@ class QuadcopterKinematicEnv:
         by_label = dict(zip(labels, handles))
         self.ax.legend(by_label.values(), by_label.keys(), loc='upper right', bbox_to_anchor=(1.3, 1.0))
         
-        plt.draw()
-        plt.pause(0.001)
+        if getattr(self, 'save_path', None):
+            plt.savefig(self.save_path, dpi=150, bbox_inches='tight')
+        else:
+            plt.draw()
+            plt.pause(0.001)
 
     def close(self):
         """Closes the rendering window."""
