@@ -75,13 +75,14 @@ class QuadcopterKinematicEnv:
         # Reward weights from config
         self.reward_config = config.get('rewards', {
             'weights': {
-                'transfer': 1.0, 
-                'collision': 25.0, 
-                'smoothness': 0.01, 
+                'transfer': 1.0,
+                'collision': 25.0,
+                'smoothness': 0.01,
                 'step_penalty': 0.1,
                 'free_space': 0.05
             },
-            'goal_bonus': 200.0,
+            # FIX 1c: explicit terminal bonuses so they apply in baseline mode too
+            'goal_bonus': 50.0,
             'collision_penalty': -50.0
         })
     
@@ -95,7 +96,137 @@ class QuadcopterKinematicEnv:
                 np.random.uniform(5, self.arena_size[2] - 5)
             ]
 
+    def set_scene_type(self, scene_type: str):
+        """
+        FIX 2a: Switch obstacle layout to one of the four paper scene types.
+        Called at the start of each episode by the training loop to replicate
+        the paper's random rotation across environments (Section VI-A).
+
+        scene_type: one of 'pillars' | 'cylinders' | 'rings' | 'forest'
+        """
+        self._current_scene_type = scene_type
+
     def _generate_obstacles(self):
+        """Generates obstacles according to the current scene type.
+
+        FIX 2b: Dispatches to a scene-specific generator so the training loop
+        can rotate between the four paper environments by calling set_scene_type()
+        before each episode reset.
+        """
+        scene = getattr(self, '_current_scene_type', 'pillars')
+
+        if scene == 'cylinders':
+            self._generate_cylinders()
+        elif scene == 'rings':
+            self._generate_rings()
+        elif scene == 'forest':
+            self._generate_forest()
+        else:  # 'pillars' (default / paper Scene-I)
+            self._generate_pillars()
+
+    # ------------------------------------------------------------------
+    # FIX 2c: Four dedicated obstacle generators matching paper Fig. 6
+    # ------------------------------------------------------------------
+
+    def _generate_pillars(self):
+        """Scene-I: randomly placed square-column (box) obstacles."""
+        self.obstacles = []
+        attempts = 0
+        while len(self.obstacles) < self.num_obstacles and attempts < 1000:
+            attempts += 1
+            pos = np.array([
+                np.random.uniform(5.0, self.arena_size[0] - 5.0),
+                np.random.uniform(5.0, self.arena_size[1] - 5.0),
+                self.arena_size[2] / 2.0
+            ])
+            w = np.random.uniform(1.0, 3.0)
+            size = np.array([w, w, self.arena_size[2]])  # full-height pillar
+            if self._check_valid(pos, size=size, is_sphere=False):
+                self.obstacles.append({
+                    'type': 'box', 'pos': pos, 'size': size,
+                    'vel': np.zeros(3), 'origin': pos.copy(), 'phase': 0.0, 'freq': 0.0
+                })
+
+    def _generate_cylinders(self):
+        """Scene-II: cylindrical (sphere-approximated) obstacles."""
+        self.obstacles = []
+        attempts = 0
+        while len(self.obstacles) < self.num_obstacles and attempts < 1000:
+            attempts += 1
+            pos = np.array([
+                np.random.uniform(5.0, self.arena_size[0] - 5.0),
+                np.random.uniform(5.0, self.arena_size[1] - 5.0),
+                np.random.uniform(1.0, self.arena_size[2] - 1.0)
+            ])
+            radius = np.random.uniform(0.5, 1.5)
+            if self._check_valid(pos, radius=radius, is_sphere=True):
+                self.obstacles.append({
+                    'type': 'sphere', 'pos': pos, 'radius': radius,
+                    'vel': np.zeros(3), 'origin': pos.copy(), 'phase': 0.0, 'freq': 0.0
+                })
+
+    def _generate_rings(self):
+        """Scene-IV: torus/ring approximated as hollow box frames."""
+        self.obstacles = []
+        n_rings = min(self.num_obstacles, 10)
+        for _ in range(n_rings):
+            cx = np.random.uniform(10.0, self.arena_size[0] - 10.0)
+            cy = np.random.uniform(10.0, self.arena_size[1] - 10.0)
+            cz = np.random.uniform(3.0,  self.arena_size[2] - 3.0)
+            outer_r = np.random.uniform(2.0, 4.0)
+            thickness = 0.5
+            # Approximate ring with 4 box segments
+            for angle in [0, np.pi / 2, np.pi, 3 * np.pi / 2]:
+                bx = cx + outer_r * np.cos(angle)
+                by = cy + outer_r * np.sin(angle)
+                pos = np.array([bx, by, cz])
+                size = np.array([thickness * 2, thickness * 2, thickness * 2])
+                self.obstacles.append({
+                    'type': 'box', 'pos': pos, 'size': size,
+                    'vel': np.zeros(3), 'origin': pos.copy(), 'phase': 0.0, 'freq': 0.0
+                })
+
+    def _generate_forest(self):
+        """Scene-III: simulated forest — dense thin vertical pillars."""
+        self.obstacles = []
+        attempts = 0
+        n_trees = max(self.num_obstacles, 20)
+        while len(self.obstacles) < n_trees and attempts < 2000:
+            attempts += 1
+            pos = np.array([
+                np.random.uniform(5.0, self.arena_size[0] - 5.0),
+                np.random.uniform(5.0, self.arena_size[1] - 5.0),
+                self.arena_size[2] / 2.0
+            ])
+            trunk_w = np.random.uniform(0.2, 0.6)
+            size = np.array([trunk_w, trunk_w, self.arena_size[2]])
+            if self._check_valid(pos, size=size, is_sphere=False):
+                self.obstacles.append({
+                    'type': 'box', 'pos': pos, 'size': size,
+                    'vel': np.zeros(3), 'origin': pos.copy(), 'phase': 0.0, 'freq': 0.0
+                })
+
+    def _check_valid(self, pos, radius=None, size=None, is_sphere=True, clearance=1.0):
+        """Returns True if a new obstacle at pos does not overlap existing ones."""
+        for obs in self.obstacles:
+            if is_sphere:
+                if obs['type'] == 'sphere':
+                    if np.linalg.norm(pos - obs['pos']) < (radius + obs['radius'] + clearance):
+                        return False
+                else:
+                    if np.linalg.norm(pos - obs['pos']) < (radius + np.max(obs['size']) + clearance):
+                        return False
+            else:
+                half = np.max(size) / 2.0
+                if obs['type'] == 'sphere':
+                    if np.linalg.norm(pos - obs['pos']) < (half + obs['radius'] + clearance):
+                        return False
+                else:
+                    if np.linalg.norm(pos - obs['pos']) < (half + np.max(obs['size']) + clearance):
+                        return False
+        return True
+
+    def _generate_obstacles_original(self):
         """Generates random spherical and box obstacles, some dynamic."""
         if self.scenario in ['narrow_passage', 'city', 'forest', 'warzone', 'urban_canyon', 'search_and_rescue', 'dynamic_intercept']:
             from .scenarios import apply_scenario_custom_logic
@@ -537,7 +668,11 @@ class QuadcopterKinematicEnv:
                 r_trans = alpha * (old_dist_to_goal - dist_to_goal)
                 r_col = -lam * np.exp(-sigma * max(d_min, 0.0))
 
-                forward_clear = self.forward_ranges[i] >= 0.99 * self.max_range
+                # FIX 1a: r_free uses paper definition — "first perspective rangefinder
+                # detects no obstacle" (i.e. the centre-forward ray is at max range).
+                # Threshold relaxed from 0.99 to 0.90 so narrow corridors don't
+                # permanently suppress this reward.
+                forward_clear = self.forward_ranges[i] >= 0.90 * self.max_range
                 r_free = r_free_const if forward_clear else 0.0
 
                 dense_r = d1 * r_trans + d2 * r_col + d3 * r_free + d4 * r_step
@@ -556,20 +691,30 @@ class QuadcopterKinematicEnv:
                         self._update_sar_goals()
                         break
             
+            # FIX 1b: terminal bonuses — paper's quadcopter env uses +50 on goal,
+            # large negative on collision. The kinematic env previously gave no bonus.
+            terminal_bonus = 0.0
+
             # Termination checks
             if dist_to_goal < self.goal_dist:
                 if self.scenario != 'search_and_rescue':
                     self.agent_dones[i] = True
                     info['agent_terminated_now'][i] = True
-            
+                    # Goal reached: strong positive signal matching paper spirit
+                    goal_bonus = self.reward_config.get('goal_bonus', 50.0)
+                    terminal_bonus += goal_bonus
+
             # Collision check
             if not self.agent_dones[i] and d_min < self.collision_dist:
                 self.agent_dones[i] = True
                 self._episode_collision = True
                 info['agent_terminated_now'][i] = True
                 info['collision'] = True
-            
-            rewards[i] = dense_r
+                # Collision: strong negative terminal signal
+                collision_bonus = self.reward_config.get('collision_penalty', -50.0)
+                terminal_bonus += collision_bonus
+
+            rewards[i] = dense_r + terminal_bonus
             self.safety_frontier[i] = min(self.safety_frontier[i], d_min)
 
         info['agent_dones'] = self.agent_dones.copy()

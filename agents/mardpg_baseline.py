@@ -8,6 +8,23 @@ from typing import List, Tuple, Dict, Any
 
 from .replay_buffer import SequenceReplayBuffer
 
+class AnnealedGaussianNoise:
+    def __init__(self, action_dim: int, sigma_start: float = 0.3, sigma_end: float = 0.05, total_steps: int = 5000000):
+        self.action_dim = action_dim
+        self.sigma_start = sigma_start
+        self.sigma_end = sigma_end
+        self.total_steps = total_steps
+        self.current_step = 0
+        self.sigma = sigma_start
+
+    def sample(self) -> np.ndarray:
+        fraction = min(1.0, float(self.current_step) / max(1.0, float(self.total_steps)))
+        self.sigma = self.sigma_start - fraction * (self.sigma_start - self.sigma_end)
+        return np.random.normal(0, self.sigma, size=self.action_dim)
+
+    def step(self):
+        self.current_step += 1
+
 class MARDPGBaseNetwork(nn.Module):
     def __init__(self, state_dim: int):
         super().__init__()
@@ -170,6 +187,11 @@ class MARDPG_Baseline:
         buffer_size = config['memory'].get('buffer_size', 1000)
         self.memory = SequenceReplayBuffer(buffer_size)
 
+        sigma_start = config.get('exploration', {}).get('sigma_start', 0.3)
+        sigma_end = config.get('exploration', {}).get('sigma_end', 0.05)
+        total_steps = config.get('exploration', {}).get('total_steps', 5000000)
+        self.noise = [AnnealedGaussianNoise(action_dim, sigma_start, sigma_end, total_steps) for _ in range(num_agents)]
+
     def select_actions(self, obs: np.ndarray, 
                        actor_hidden: List[Tuple[torch.Tensor, torch.Tensor]], 
                        critic_hidden: List[Tuple[torch.Tensor, torch.Tensor]],
@@ -192,7 +214,8 @@ class MARDPG_Baseline:
                 action_np = action.cpu().numpy().flatten()
                 
                 if explore:
-                    action_np += np.random.normal(0, 0.1, size=self.action_dim)
+                    action_np += self.noise[i].sample()
+                    self.noise[i].step()
                     
                 action_np = np.clip(action_np, -self.action_bound, self.action_bound)
                 actions.append(action_np.astype(np.float32))

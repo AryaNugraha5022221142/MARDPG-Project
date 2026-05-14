@@ -29,6 +29,19 @@ update_interval: 100
 targets:
   update_rate: 0.01
 
+# FIX 5d: Annealed Gaussian exploration noise parameters (see AnnealedGaussianNoise).
+# sigma_start=0.3 covers ~57% of the ±π/6 action range for early exploration.
+# total_steps = 10000 episodes × ~500 avg steps = 5M.
+exploration:
+  sigma_start: 0.3
+  sigma_end: 0.05
+  total_steps: 5000000
+
+# FIX 1d: terminal bonuses now used by kinematic env baseline reward path
+rewards:
+  goal_bonus: 50.0
+  collision_penalty: -50.0
+
 environment:
   action_bound: 0.5235987756
   arena_size: [30, 30, 60]
