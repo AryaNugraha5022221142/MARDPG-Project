@@ -132,18 +132,18 @@ class QuadcopterKinematicEnv:
         """Scene-I: square-column (box) obstacles."""
         self.obstacles = []
         attempts = 0
-        n_obs = self.num_obstacles * 2
-        while len(self.obstacles) < n_obs and attempts < 1000:
+        n_obs = self.num_obstacles * 4
+        while len(self.obstacles) < n_obs and attempts < 2000:
             attempts += 1
-            w = np.random.uniform(2.0, 5.0)
-            h = np.random.uniform(5.0, self.arena_size[2] * 0.8)
+            w = np.random.uniform(2.5, 6.0)
+            h = np.random.uniform(5.0, self.arena_size[2] * 0.9)
             pos = np.array([
                 np.random.uniform(5.0, self.arena_size[0] - 5.0),
                 np.random.uniform(5.0, self.arena_size[1] - 5.0),
                 h / 2.0
             ])
             size = np.array([w, w, h])
-            if self._check_valid(pos, size=size, is_sphere=False):
+            if self._check_valid(pos, size=size, is_sphere=False, clearance=-1.0):
                 self.obstacles.append({
                     'type': 'box', 'pos': pos, 'size': size,
                     'vel': np.zeros(3), 'origin': pos.copy(), 'phase': 0.0, 'freq': 0.0
@@ -153,10 +153,10 @@ class QuadcopterKinematicEnv:
         """Scene-II: cylindrical obstacles (modeled as boxes for physics)."""
         self.obstacles = []
         attempts = 0
-        n_obs = self.num_obstacles * 3
-        while len(self.obstacles) < n_obs and attempts < 1000:
+        n_obs = self.num_obstacles * 6
+        while len(self.obstacles) < n_obs and attempts < 2000:
             attempts += 1
-            r = np.random.uniform(1.5, 3.0)
+            r = np.random.uniform(1.5, 4.0)
             h = np.random.uniform(5.0, self.arena_size[2] * 0.9)
             pos = np.array([
                 np.random.uniform(5.0, self.arena_size[0] - 5.0),
@@ -164,7 +164,7 @@ class QuadcopterKinematicEnv:
                 h / 2.0
             ])
             size = np.array([r*2, r*2, h])
-            if self._check_valid(pos, size=size, is_sphere=False):
+            if self._check_valid(pos, size=size, is_sphere=False, clearance=-1.0):
                 self.obstacles.append({
                     'type': 'box', 'pos': pos, 'size': size,
                     'vel': np.zeros(3), 'origin': pos.copy(), 'phase': 0.0, 'freq': 0.0,
@@ -174,17 +174,17 @@ class QuadcopterKinematicEnv:
     def _generate_rings(self):
         """Scene-IV: circular/ring obstacles approximated as box frames."""
         self.obstacles = []
-        n_rings = self.num_obstacles * 2
+        n_rings = self.num_obstacles * 6
         attempts = 0
-        while len(self.obstacles) < n_rings and attempts < 1000:
+        while len(self.obstacles) < n_rings and attempts < 3000:
             attempts += 1
-            cx = np.random.uniform(10.0, self.arena_size[0] - 10.0)
-            cy = np.random.uniform(10.0, self.arena_size[1] - 10.0)
-            cz = np.random.uniform(5.0,  self.arena_size[2] - 5.0)
-            outer_r = np.random.uniform(3.0, 7.0)
+            cx = np.random.uniform(5.0, self.arena_size[0] - 5.0)
+            cy = np.random.uniform(5.0, self.arena_size[1] - 5.0)
+            cz = np.random.uniform(2.0,  self.arena_size[2] - 2.0)
+            outer_r = np.random.uniform(2.5, 6.0)
             pos = np.array([cx, cy, cz])
             
-            if self._check_valid(pos, radius=outer_r, is_sphere=True, clearance=-0.5):
+            if self._check_valid(pos, radius=outer_r, is_sphere=True, clearance=-2.0):
                 theta = np.random.uniform(0, 2*np.pi)
                 phi = np.random.uniform(0, np.pi)
                 self.obstacles.append({
@@ -197,18 +197,18 @@ class QuadcopterKinematicEnv:
         """Scene-III: simulated forest — random blobs/irregular shapes."""
         self.obstacles = []
         attempts = 0
-        n_trees = self.num_obstacles * 6
-        while len(self.obstacles) < n_trees and attempts < 2000:
+        n_trees = self.num_obstacles * 12
+        while len(self.obstacles) < n_trees and attempts < 4000:
             attempts += 1
             pos = np.array([
                 np.random.uniform(2.0, self.arena_size[0] - 2.0),
                 np.random.uniform(2.0, self.arena_size[1] - 2.0),
-                np.random.uniform(1.0, 8.0)
+                np.random.uniform(1.0, 10.0)
             ])
-            radius = np.random.uniform(2.0, 4.5)
-            pos[2] = np.random.uniform(radius, radius*2.5) # keep low
+            radius = np.random.uniform(1.5, 4.5)
+            pos[2] = np.random.uniform(radius, radius*3.0) # keep low
             
-            if self._check_valid(pos, radius=radius, is_sphere=True, clearance=-1.0):
+            if self._check_valid(pos, radius=radius, is_sphere=True, clearance=-2.5):
                 self.obstacles.append({
                     'type': 'blob', 'pos': pos, 'radius': radius,
                     'vel': np.zeros(3), 'origin': pos.copy(), 'phase': 0.0, 'freq': 0.0
@@ -218,7 +218,7 @@ class QuadcopterKinematicEnv:
         """Returns True if a new obstacle at pos does not overlap existing ones."""
         for obs in self.obstacles:
             if is_sphere:
-                if obs['type'] == 'sphere':
+                if obs['type'] in ['sphere', 'blob', 'ring']:
                     if np.linalg.norm(pos - obs['pos']) < (radius + obs['radius'] + clearance):
                         return False
                 else:
@@ -226,7 +226,7 @@ class QuadcopterKinematicEnv:
                         return False
             else:
                 half = np.max(size) / 2.0
-                if obs['type'] == 'sphere':
+                if obs['type'] in ['sphere', 'blob', 'ring']:
                     if np.linalg.norm(pos - obs['pos']) < (half + obs['radius'] + clearance):
                         return False
                 else:
