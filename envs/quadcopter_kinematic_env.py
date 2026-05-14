@@ -770,9 +770,9 @@ class QuadcopterKinematicEnv:
         self.ax.clear()
         
         # Grid settings
-        self.ax.w_xaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
-        self.ax.w_yaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
-        self.ax.w_zaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
+        self.ax.xaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
+        self.ax.yaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
+        self.ax.zaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
         self.ax.grid(True, color='white', linewidth=0.5, alpha=0.5)
         
         # Set limits
