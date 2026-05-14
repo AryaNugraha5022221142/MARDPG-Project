@@ -64,7 +64,7 @@ def main():
     # Tracking Error histogram
     plt.figure(figsize=(8, 6))
     sns.histplot(tracking_errors, bins=50, kde=True, color='lightgreen')
-    plt.title('LQR Tracking Error Distribution over Episodes')
+    plt.title('Velocity Tracking Error Distribution over Episodes')
     plt.xlabel('Mean Absolute Error (|v_{ref} - v_actual|)')
     plt.savefig(os.path.join(config['logging']['log_dir'], 'eval_tracking_error_hist.png'), dpi=300)
     

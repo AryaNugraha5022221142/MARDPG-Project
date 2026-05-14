@@ -2,7 +2,6 @@
 import numpy as np
 from typing import Tuple, Dict, Any, List
 from .dynamics import QuadcopterDynamics
-from .lqr_controller import PerAxisLQR
 
 class QuadcopterEnv:
     """
@@ -55,7 +54,6 @@ class QuadcopterEnv:
         self.arena_diagonal = np.linalg.norm(self.arena_size)
         
         self.agents = [QuadcopterDynamics(dt=self.dt) for _ in range(self.num_agents)]
-        self.lqr = PerAxisLQR(dt=self.dt)
         
         # Dynamic goals based on arena size
         self.goals = np.zeros((self.num_agents, 3), dtype=np.float32)
@@ -512,7 +510,7 @@ class QuadcopterEnv:
             world_cmd = np.array([vx_world, vy_world, vz_cmd, yaw_rate_cmd])
             
             old_vel = self.agents[i].state[6:9].copy()
-            self.agents[i].rl_step(world_cmd, self.lqr, M=self.M)
+            self.agents[i].rl_step(world_cmd, M=self.M)
             
             # Confine flight to arena size (specifically altitude)
             # state[0:3] = [x, y, z]

@@ -23,7 +23,7 @@ class KinematicDynamics:
         self.state[8] = self.v * np.sin(self.state[4])
         return self.state.copy()
 
-    def rl_step(self, action: np.ndarray, lqr=None, M: int = 1):
+    def rl_step(self, action: np.ndarray, M: int = 1):
         """
         action: [rho, tau] steering signals as angular rates in rad/s.
         rho updates horizontal/yaw angle; tau updates vertical/pitch angle.

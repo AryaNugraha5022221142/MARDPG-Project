@@ -526,7 +526,7 @@ class QuadcopterKinematicEnv:
             self.prev_accel[i] = accel.copy()
             jerk_arr[i] = jerk_val
             
-            # No tracking errors since no LQR reference tracking
+            # No velocity tracking errors since this is a kinematic model
             tracking_errors[i] = 0.0
             
         obs = self._get_observations()

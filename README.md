@@ -55,19 +55,13 @@ To see the environment scenarios without training:
 python scripts/visualize_env.py --scenario static_dense
 ```
 
-### 2. Test Classical Baseline (Potential Field)
-Before running MARDPG, you can test a classical navigation algorithm:
-```bash
-python scripts/test_classical.py --scenario static_dense --render
-```
-
-### 3. Training
+### 2. Training
 To start the training process:
 ```bash
 python scripts/train.py --config config/config.yaml --run-name my_first_test
 ```
 
-### 4. Evaluation
+### 3. Evaluation
 To test a trained model:
 ```bash
 python scripts/evaluate.py --config config/config.yaml --checkpoint checkpoints/mardpg_final.pt --render
@@ -85,8 +79,8 @@ You can test the algorithms in different scenarios by using the `--scenario` fla
 
 ## 🏗️ Environment Structure
 - **State Space (34D)**: 25 rangefinder rays (5x5 grid) + 5D relative goal info + 3D normalized velocity + 1D saturation indicator.
-- **Action Space (4D Continuous)**: Pitch, Roll, Throttle, Yaw rate commands processed via internal LQR controller.
-- **Dynamics**: Simplified 3D quadcopter physics with inertia, drag, and LQR stabilization.
+- **Action Space (4D Continuous)**: Pitch, Roll, Throttle, Yaw rate commands processed internally.
+- **Dynamics**: Simplified 3D quadcopter physics with inertia and drag.
 
 ## ☁️ Google Colab Workflow
 

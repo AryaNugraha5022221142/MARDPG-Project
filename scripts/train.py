@@ -15,7 +15,7 @@ from tqdm import tqdm
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from envs import QuadcopterEnv
-from agents import MARDPG, MADDPG, MARTD3, MARDPG_Gaussian
+from agents import MARDPG, MARDPG_Gaussian
 
 def _make_agent(agent_type, obs_dim, action_dim, num_agents, config, device):
     if agent_type in ['mardpg', 'iddpg']:
@@ -23,10 +23,6 @@ def _make_agent(agent_type, obs_dim, action_dim, num_agents, config, device):
         return MARDPG(obs_dim=obs_dim, action_dim=action_dim, num_agents=num_agents,
                       config=config, device=device,
                       independent_critics=(agent_type == 'iddpg'))
-    elif agent_type == 'martd3':
-        from agents import MARTD3
-        return MARTD3(obs_dim=obs_dim, action_dim=action_dim, num_agents=num_agents,
-                      config=config, device=device, independent_critics=False)
     elif agent_type == 'mardpg_g':
         from agents import MARDPG_Gaussian
         return MARDPG_Gaussian(obs_dim=obs_dim, action_dim=action_dim, num_agents=num_agents,
@@ -36,15 +32,13 @@ def _make_agent(agent_type, obs_dim, action_dim, num_agents, config, device):
         return MARDPG_Baseline(obs_dim=obs_dim, action_dim=action_dim, num_agents=num_agents,
                                config=config, device=device, independent_critics=False)
     else:
-        from agents import MADDPG
-        return MADDPG(obs_dim=obs_dim, action_dim=action_dim, num_agents=num_agents,
-                      config=config, device=device)
+        raise ValueError(f"Unknown agent type {agent_type}")
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='config/config.yaml', help='Path to config file')
     parser.add_argument('--run-name', type=str, default='mardpg_run', help='Name of the run')
-    parser.add_argument('--agent', type=str, default='mardpg', choices=['mardpg', 'maddpg', 'iddpg', 'martd3', 'mardpg_g', 'mardpg_baseline'], help='Agent type to train')
+    parser.add_argument('--agent', type=str, default='mardpg', choices=['mardpg', 'iddpg', 'mardpg_g', 'mardpg_baseline'], help='Agent type to train')
     parser.add_argument('--scenario', type=str, default=None, help='Scenario name (e.g., urban_canyon, search_and_rescue)')
     parser.add_argument('--num-episodes', type=int, default=None, help='Number of episodes to train')
     parser.add_argument('--seed', type=int, default=None, help='Random seed')
@@ -222,9 +216,6 @@ def main():
             if args.agent in ['mardpg', 'iddpg', 'mardpg_g', 'mardpg_baseline']:
                 actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
                 critic_hidden = [agent.critics[i].init_hidden(1, device) for i in range(env.num_agents)]
-            elif args.agent == 'martd3':
-                actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
-                critic_hidden = [agent.critics_1[i].init_hidden(1, device) for i in range(env.num_agents)]
             
             episode_reward = 0
             done = False
@@ -246,7 +237,7 @@ def main():
                 if args.render:
                     env.render()
                     
-                if args.agent in ['mardpg', 'iddpg', 'martd3', 'mardpg_g', 'mardpg_baseline']:
+                if args.agent in ['mardpg', 'iddpg', 'mardpg_g', 'mardpg_baseline']:
                     actions, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden)
                     
                     # Compute mean hidden state norm (h part of lstm hidden state)
@@ -277,7 +268,7 @@ def main():
                 done = terminated or truncated
                 global_step_count += 1
                 
-                if args.agent in ['mardpg', 'iddpg', 'martd3', 'mardpg_g', 'mardpg_baseline']:
+                if args.agent in ['mardpg', 'iddpg', 'mardpg_g', 'mardpg_baseline']:
                     agent.memory.push(obs, np.array(actions), rewards, next_obs, dones, done)
                 else:
                     agent.memory.push(obs, np.array(actions), rewards, next_obs, dones)
@@ -309,7 +300,7 @@ def main():
             length_history.append(episode_length)
             collision_history.append(float(episode_collision))
             
-            hidden_state_norm_history.append(np.mean(episode_h_norms) if hasattr(agent, 'actor') and args.agent in ['mardpg', 'iddpg', 'martd3', 'mardpg_g'] else np.nan)
+            hidden_state_norm_history.append(np.mean(episode_h_norms) if hasattr(agent, 'actor') and args.agent in ['mardpg', 'iddpg', 'mardpg_g'] else np.nan)
             tracking_error_history.append(np.mean(episode_tracking_errors))
             action_smoothness_history.append(np.mean(episode_action_smoothness))
             min_agent_dist_history.append(np.mean(episode_min_agent_distances))
@@ -553,7 +544,7 @@ def main():
     if not tracking_series.empty:
         smooth_tracking = tracking_series.rolling(window=window_size, min_periods=1).mean()
         plt.plot(smooth_tracking.index, smooth_tracking.values, color='#16a085', linewidth=2)
-        plt.title(f'LQR Tracking Error |v_{{ref}} - v| during Training ({args.agent.upper()})', fontsize=14, fontweight='bold')
+        plt.title(f'Velocity Tracking Error |v_{{ref}} - v| during Training ({args.agent.upper()})', fontsize=14, fontweight='bold')
         plt.xlabel('Episodes', fontsize=12)
         plt.ylabel('Mean Absolute Error', fontsize=12)
         plt.grid(True, linestyle=':', alpha=0.6)

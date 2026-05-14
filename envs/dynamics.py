@@ -22,9 +22,9 @@ class QuadcopterDynamics:
         self.state[0:3] = start_pos
         self.state[5] = start_yaw
 
-    def rl_step(self, velocity_ref: np.ndarray, lqr, M: int = 10):
+    def rl_step(self, velocity_ref: np.ndarray, M: int = 10):
         """
-        Outer RL step: runs M inner LQR steps.
+        Outer RL step: runs M inner steps.
         velocity_ref: [vx*, vy*, vz*, yaw_rate*] from RL policy
         """
         yaw_rate_cmd_rad = np.deg2rad(velocity_ref[3])
@@ -32,15 +32,12 @@ class QuadcopterDynamics:
         
         for _ in range(M):
             for j, axis in enumerate([0, 1, 2]):
-                # Velocity measurement noise: \hat{v} = v + N(0, \sigma_v^2)
-                v_hat = self.state[6+j] + np.random.normal(0, self.velocity_noise_std)
+                # Assume direct velocity command maps to u_j actuator signal
+                v_cmd = velocity_ref[j]
                 
-                # Pure velocity feedback LQR mapping
-                u_j = lqr.compute_velocity_input(velocity_ref[j], v_hat)
-                
-                if abs(u_j) > 5.0:
+                if abs(v_cmd) > 5.0:
                     self.is_saturated = True
-                u_j = 5.0 * np.tanh(u_j / 5.0)  # Actuator saturation Eq. 3.74
+                u_j = 5.0 * np.tanh(v_cmd / 5.0)  # Actuator saturation Eq. 3.74
                 
                 # Apply u_j to plant dynamics (ZOH update, Eq. 3.16)
                 alpha = np.exp(-self.dt / self.tau)

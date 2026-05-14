@@ -11,13 +11,13 @@ import matplotlib.pyplot as plt
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from envs import QuadcopterEnv
-from agents import MARDPG, MADDPG, MARTD3, MARDPG_Gaussian
+from agents import MARDPG, MARDPG_Gaussian
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='config/config.yaml')
     parser.add_argument('--checkpoint', type=str, required=True)
-    parser.add_argument('--agent', type=str, default='mardpg', choices=['mardpg', 'maddpg', 'iddpg', 'martd3', 'mardpg_g', 'mardpg_baseline'], help='Agent type to evaluate')
+    parser.add_argument('--agent', type=str, default='mardpg', choices=['mardpg', 'iddpg', 'mardpg_g', 'mardpg_baseline'], help='Agent type to evaluate')
     parser.add_argument('--scenario', type=str, default=None, help='Scenario name')
     parser.add_argument('--level', type=int, default=None, help='Curriculum level to evaluate on (0-4)')
     parser.add_argument('--episodes', type=int, default=100)
@@ -54,15 +54,6 @@ def main():
             device=device,
             independent_critics=(args.agent == 'iddpg')
         )
-    elif args.agent == 'martd3':
-        agent = MARTD3(
-            obs_dim=obs_dim, 
-            action_dim=4, 
-            num_agents=config['training']['num_agents'], 
-            config=config, 
-            device=device,
-            independent_critics=False
-        )
     elif args.agent == 'mardpg_g':
         agent = MARDPG_Gaussian(
             obs_dim=obs_dim, 
@@ -83,13 +74,7 @@ def main():
             independent_critics=False
         )
     else:
-        agent = MADDPG(
-            obs_dim=obs_dim, 
-            action_dim=4, 
-            num_agents=config['training']['num_agents'], 
-            config=config, 
-            device=device
-        )
+        raise ValueError(f"Unknown agent type {args.agent}")
     
     agent.load(args.checkpoint)
     print(f"Loaded checkpoint from {args.checkpoint}")
@@ -117,9 +102,6 @@ def main():
             if args.agent in ['mardpg', 'iddpg', 'mardpg_g', 'mardpg_baseline']:
                 actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
                 critic_hidden = [agent.critics[i].init_hidden(1, device) for i in range(env.num_agents)]
-            elif args.agent == 'martd3':
-                actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
-                critic_hidden = [agent.critics_1[i].init_hidden(1, device) for i in range(env.num_agents)]
             
             done = False
             steps = 0
@@ -132,7 +114,7 @@ def main():
                 for i in range(env.num_agents):
                     ep_trajectories[i].append(env.agents[i].state[:3].copy())
                     
-                if args.agent in ['mardpg', 'iddpg', 'martd3', 'mardpg_g', 'mardpg_baseline']:
+                if args.agent in ['mardpg', 'iddpg', 'mardpg_g', 'mardpg_baseline']:
                     actions, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden, explore=False)
                 else:
                     actions = agent.select_actions(obs, explore=False)
