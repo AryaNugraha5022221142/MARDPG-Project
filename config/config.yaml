@@ -51,7 +51,7 @@ environment:
   dynamic_ratio: 0.0       # CHANGED: disable dynamic obstacles until system is stable
   max_steps: 2000
   obs_dim: 41              # CHANGED: 38 base + 3 agent-id (or 38 if skipping Fix 12)
-  reward_type: "linear"
+  reward_type: "baseline"
   rate_limit_per_step: 1.0  # CHANGED: increased from 0.5
 
 logging:

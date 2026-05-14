@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 # Add the project root to the Python path so it can find 'envs' and 'agents'
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from envs import QuadcopterEnv
+from envs import QuadcopterKinematicEnv
 from agents import MARDPG, MARDPG_Gaussian
 
 def main():
@@ -32,7 +32,7 @@ def main():
     env_config = config['environment'].copy()
     env_config['agent_id_dim'] = config['training']['num_agents']
     
-    env = QuadcopterEnv(
+    env = QuadcopterKinematicEnv(
         num_agents=config['training']['num_agents'], 
         config=env_config,
         render_mode='human' if args.render else None,
@@ -48,7 +48,7 @@ def main():
     if args.agent in ['mardpg', 'iddpg']:
         agent = MARDPG(
             obs_dim=obs_dim, 
-            action_dim=4, 
+            action_dim=2, 
             num_agents=config['training']['num_agents'], 
             config=config, 
             device=device,
@@ -57,7 +57,7 @@ def main():
     elif args.agent == 'mardpg_g':
         agent = MARDPG_Gaussian(
             obs_dim=obs_dim, 
-            action_dim=4, 
+            action_dim=2, 
             num_agents=config['training']['num_agents'], 
             config=config, 
             device=device,
@@ -67,7 +67,7 @@ def main():
         from agents import MARDPG_Baseline
         agent = MARDPG_Baseline(
             obs_dim=obs_dim, 
-            action_dim=4, 
+            action_dim=2, 
             num_agents=config['training']['num_agents'], 
             config=config, 
             device=device,

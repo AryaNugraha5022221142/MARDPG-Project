@@ -31,10 +31,9 @@ class KinematicDynamics:
         """
         rho = float(action[0])
         tau = float(action[1])
-        control_dt = self.dt * M
 
-        self.state[5] += rho * control_dt
-        self.state[4] += tau * control_dt
+        self.state[5] += rho
+        self.state[4] += tau
 
         self.state[5] = (self.state[5] + np.pi) % (2 * np.pi) - np.pi
         self.state[4] = np.clip(self.state[4], -np.pi / 2, np.pi / 2)
@@ -50,9 +49,9 @@ class KinematicDynamics:
         self.state[7] = vy
         self.state[8] = vz
 
-        self.state[0] += vx * control_dt
-        self.state[1] += vy * control_dt
-        self.state[2] += vz * control_dt
+        self.state[0] += vx
+        self.state[1] += vy
+        self.state[2] += vz
 
         self.state[9] = 0.0
         self.state[10] = tau

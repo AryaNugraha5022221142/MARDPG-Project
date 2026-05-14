@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from envs import QuadcopterEnv
+from envs import QuadcopterKinematicEnv
 from agents import MARDPG, MARDPG_Gaussian
 
 def main():
@@ -26,7 +26,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() and config['training'].get('device') == 'cuda' else "cpu")
     
     # Init Env (dummy first to initialize)
-    env = QuadcopterEnv(
+    env = QuadcopterKinematicEnv(
         num_agents=config['training']['num_agents'], 
         config=config['environment'],
         render_mode=None
@@ -36,9 +36,9 @@ def main():
     
     # Initialize Agent
     if args.agent in ['mardpg', 'iddpg']:
-        agent = MARDPG(obs_dim=obs_dim, action_dim=4, num_agents=env.num_agents, config=config, device=device, independent_critics=(args.agent == 'iddpg'))
+        agent = MARDPG(obs_dim=obs_dim, action_dim=2, num_agents=env.num_agents, config=config, device=device, independent_critics=(args.agent == 'iddpg'))
     elif args.agent == 'mardpg_g':
-        agent = MARDPG_Gaussian(obs_dim=obs_dim, action_dim=4, num_agents=env.num_agents, config=config, device=device, independent_critics=False)
+        agent = MARDPG_Gaussian(obs_dim=obs_dim, action_dim=2, num_agents=env.num_agents, config=config, device=device, independent_critics=False)
     else:
         raise ValueError(f"Unknown agent type {args.agent}")
         

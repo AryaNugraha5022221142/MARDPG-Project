@@ -14,7 +14,7 @@ from tqdm import tqdm
 # Add the project root to the Python path so it can find 'envs' and 'agents'
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from envs import QuadcopterEnv
+from envs import QuadcopterKinematicEnv
 from agents import MARDPG, MARDPG_Gaussian
 
 def _make_agent(agent_type, obs_dim, action_dim, num_agents, config, device):
@@ -45,7 +45,7 @@ def main():
     parser.add_argument('--output-json', type=str, default=None, help='Path to save final metrics as JSON')
     parser.add_argument('--render', action='store_true', help='Enable 3D visualization during training')
     parser.add_argument('--sensor-noise', type=float, default=0.02, help='Sensor noise standard deviation')
-    parser.add_argument('--reward-type', type=str, default='linear', choices=['linear', 'exponential'], help='Reward function type')
+    parser.add_argument('--reward-type', type=str, default='baseline', choices=['baseline', 'linear', 'exponential'], help='Reward function type')
     args = parser.parse_args()
 
     with open(args.config, 'r') as f:
@@ -74,7 +74,7 @@ def main():
     env_config['sensor_noise_std'] = args.sensor_noise
     env_config['reward_type'] = args.reward_type
 
-    env = QuadcopterEnv(
+    env = QuadcopterKinematicEnv(
         num_agents=config['training']['num_agents'], 
         config=env_config,
         render_mode='human' if args.render else None,
@@ -143,11 +143,11 @@ def main():
 
     # Re-create env and agent with starting agents
     env_config_start = env_config.copy()
-    env = QuadcopterEnv(num_agents=current_num_agents, config=env_config_start,
+    env = QuadcopterKinematicEnv(num_agents=current_num_agents, config=env_config_start,
                         render_mode='human' if args.render else None,
                         scenario=args.scenario)
     env.set_curriculum_level(curriculum_level)
-    agent = _make_agent(args.agent, obs_dim, 4, current_num_agents, config, device)
+    agent = _make_agent(args.agent, obs_dim, 2, current_num_agents, config, device)
     
     # Academic Data Tracking
     reward_history = []
@@ -185,12 +185,12 @@ def main():
                             print(f"\n[Agent Curriculum] Upgrading to {current_num_agents} agents at episode {episode}")
                             # Save actor weights
                             actor_state = agent.actor.state_dict()
-                            env = QuadcopterEnv(num_agents=current_num_agents,
+                            env = QuadcopterKinematicEnv(num_agents=current_num_agents,
                                                config=env_config.copy(),
                                                render_mode='human' if args.render else None,
                                                scenario=args.scenario)
                             env.set_curriculum_level(curriculum_level)
-                            agent = _make_agent(args.agent, obs_dim, 4, current_num_agents, config, device)
+                            agent = _make_agent(args.agent, obs_dim, 2, current_num_agents, config, device)
                             # Transfer actor weights
                             agent.actor.load_state_dict(actor_state, strict=False)
                             agent.actor_target.load_state_dict(actor_state, strict=False)

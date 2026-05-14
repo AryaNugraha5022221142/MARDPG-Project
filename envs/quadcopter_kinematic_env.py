@@ -46,9 +46,7 @@ class QuadcopterKinematicEnv:
         self.M = config.get('inner_steps', 10)
         self.cooperative = config.get('cooperative', False)
         self.rate_limit_per_step = config.get('rate_limit_per_step', 1.0)
-        self.action_bound = float(config.get('action_bound', 2.5))
-        self.max_yaw_rate = np.deg2rad(config.get('max_yaw_rate_deg', 45.0))
-        self.max_pitch_rate = np.deg2rad(config.get('max_pitch_rate_deg', 30.0))
+        self.action_bound = float(config.get('action_bound', np.pi / 6.0))
         self.agent_id_dim = int(config.get('agent_id_dim', self.num_agents))
         self.obs_dim = 25 + 5 + 3 + 1 + 2 + self.agent_id_dim
         
@@ -506,10 +504,8 @@ class QuadcopterKinematicEnv:
             old_vel = self.agents[i].state[6:9].copy()
             
             # Kinematic update: action is [rho, tau]
-            yaw_rate = action[0] * (self.max_yaw_rate / self.action_bound)
-            pitch_rate = action[1] * (self.max_pitch_rate / self.action_bound)
-            steering_rates = np.array([yaw_rate, pitch_rate], dtype=np.float32)
-            self.agents[i].rl_step(steering_rates, M=self.M)
+            steering = np.array([action[0], action[1]], dtype=np.float32)
+            self.agents[i].rl_step(steering, M=self.M)
             
             # Confine flight to arena size (specifically altitude)
             # state[0:3] = [x, y, z]
@@ -583,14 +579,11 @@ class QuadcopterKinematicEnv:
                 tracking_penalty = -tracking_weight * float(tracking_errors[i]) ** 2
                 dense_r = r_transfer + action_penalty + collision_penalty + step_penalty + tracking_penalty
             
-            terminal_bonus = 0.0
-            
             if self.scenario == 'search_and_rescue':
                 target_radius = self.reward_config.get('target_radius', 0.5)
                 for j, t_pos in enumerate(self.sar_targets):
                     if j not in self.targets_claimed and np.linalg.norm(pos - t_pos) < target_radius:
                         self.targets_claimed.add(j)
-                        terminal_bonus += 50.0  # SAR bonus
                         self._update_sar_goals()
                         break
             
@@ -599,7 +592,6 @@ class QuadcopterKinematicEnv:
                 if self.scenario != 'search_and_rescue':
                     self.agent_dones[i] = True
                     info['agent_terminated_now'][i] = True
-                    terminal_bonus += self.reward_config.get('goal_bonus', 50.0)
             
             # Collision check
             if not self.agent_dones[i] and d_min < self.collision_dist:
@@ -607,12 +599,8 @@ class QuadcopterKinematicEnv:
                 self._episode_collision = True
                 info['agent_terminated_now'][i] = True
                 info['collision'] = True
-                penalty = self.reward_config.get('collision_penalty', -20.0)
-                penalty_scale = 2.0
-                penalty *= penalty_scale
-                terminal_bonus += penalty
             
-            rewards[i] = dense_r + terminal_bonus
+            rewards[i] = dense_r
             self.safety_frontier[i] = min(self.safety_frontier[i], d_min)
 
         info['agent_dones'] = self.agent_dones.copy()

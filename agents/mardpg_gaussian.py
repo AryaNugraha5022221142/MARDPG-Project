@@ -52,7 +52,7 @@ class MARDPG_Gaussian:
         self.batch_size = config['memory'].get('batch_size', 32)
         self.seq_len = config['memory'].get('seq_len', 16)
         self.max_grad_norm = config['learning'].get('max_grad_norm', 1.0)
-        self.action_bound = float(config.get('environment', {}).get('action_bound', 2.5))
+        self.action_bound = float(config.get('environment', {}).get('action_bound', np.pi / 6.0))
         
         # Shared Actor
         hidden_dim = config['network']['actor'].get('hidden_dim', 128)
