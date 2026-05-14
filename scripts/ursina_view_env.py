@@ -63,18 +63,16 @@ class EnvironmentScene:
         
         return sun
     
-    def create_ground(self, texture_name, scale=(100, 1, 100), color=color.white, repeat=10):
-        """Create a ground plane with texture"""
+    def create_ground(self, texture_name=None, scale=(100, 1, 100), color=color.white, repeat=10):
+        """Create a ground plane"""
         ground = Entity(
             model='plane',
-            texture=texture_name,
             scale=scale,
             color=color,
             double_sided=False,
             collider='box',
             position=(0, -0.1, 0)
         )
-        ground.texture_scale = (repeat, repeat)
         self.add_entity(ground)
         return ground
     
@@ -82,7 +80,7 @@ class EnvironmentScene:
                     foliage_color=color.rgb(34, 139, 34), scale=0.5):
         """Create a simple realistic tree"""
         trunk = Entity(
-            model='cylinder',
+            model=Cylinder(resolution=12),
             color=trunk_color,
             position=(x, 0, z),
             scale=(scale*0.3, scale, scale*0.3),
@@ -108,7 +106,7 @@ class EnvironmentScene:
     def create_cactus(self, x, z, scale=0.4):
         """Create a saguaro cactus"""
         main_body = Entity(
-            model='cylinder',
+            model=Cylinder(resolution=12),
             color=color.rgb(34, 139, 34),
             position=(x, 0, z),
             scale=(scale*0.2, scale, scale*0.2),
@@ -116,14 +114,14 @@ class EnvironmentScene:
         )
         # Arms
         arm_left = Entity(
-            model='cylinder',
+            model=Cylinder(resolution=12),
             color=color.rgb(34, 139, 34),
             position=(x - scale*0.15, scale*0.6, z),
             scale=(scale*0.1, scale*0.3, scale*0.1),
             rotation=(0, 0, 45)
         )
         arm_right = Entity(
-            model='cylinder',
+            model=Cylinder(resolution=12),
             color=color.rgb(34, 139, 34),
             position=(x + scale*0.15, scale*0.6, z),
             scale=(scale*0.1, scale*0.3, scale*0.1),
@@ -136,7 +134,7 @@ class EnvironmentScene:
     def create_palm_tree(self, x, z, scale=0.5):
         """Create a palm tree"""
         trunk = Entity(
-            model='cylinder',
+            model=Cylinder(resolution=12),
             color=color.rgb(101, 67, 33),
             position=(x, 0, z),
             scale=(scale*0.15, scale, scale*0.15),
@@ -145,7 +143,7 @@ class EnvironmentScene:
         # Fronds (using flattened cones)
         for angle in [0, 72, 144, 216, 288]:
             frond = Entity(
-                model='cone',
+                model=Cone(resolution=8),
                 color=color.rgb(34, 139, 34),
                 position=(x, scale*0.9, z),
                 scale=(scale*0.5, scale*0.05, scale*0.1),
@@ -181,7 +179,7 @@ class ForestScene(EnvironmentScene):
         ground = self.create_ground('grass', scale=(120, 1, 120), repeat=15)
         ground.color = color.rgb(50, 80, 30)
         
-        sky = Sky(texture='sky_default')
+        sky = Sky(color=color.rgb(135, 206, 235))
         self.add_entity(sky)
         
         for _ in range(150):
@@ -193,7 +191,7 @@ class ForestScene(EnvironmentScene):
             self.create_tree(x, z, scale=scale)
         
         pond = Entity(
-            model='cylinder',
+            model=Cylinder(resolution=16),
             color=color.rgb(30, 100, 150),
             position=(0, -0.05, 0),
             scale=(15, 0.1, 15),
@@ -216,7 +214,7 @@ class DesertScene(EnvironmentScene):
         ground = self.create_ground('sand', scale=(120, 1, 120), repeat=20)
         ground.color = color.rgb(210, 180, 140)
         
-        sky = Sky(texture='sky_sunset')
+        sky = Sky(color=color.rgb(255, 140, 100))
         self.add_entity(sky)
         
         for _ in range(80):
@@ -226,7 +224,7 @@ class DesertScene(EnvironmentScene):
             self.create_cactus(x, z, scale)
             
         oasis_water = Entity(
-            model='cylinder',
+            model=Cylinder(resolution=16),
             color=color.rgb(70, 150, 200),
             position=(0, -0.05, 0),
             scale=(15, 0.05, 15),
@@ -249,7 +247,7 @@ class SnowyMountainsScene(EnvironmentScene):
         ground = self.create_ground('white', scale=(120, 1, 120), repeat=10)
         ground.color = color.rgb(220, 230, 240)
             
-        sky = Sky(texture='sky_cloudy')
+        sky = Sky(color=color.rgb(180, 200, 255))
         self.add_entity(sky)
         
         for _ in range(100):
@@ -257,13 +255,13 @@ class SnowyMountainsScene(EnvironmentScene):
             z = random.uniform(-55, 55)
             scale = random.uniform(2, 6)
             trunk = Entity(
-                model='cylinder',
+                model=Cylinder(resolution=8),
                 color=color.rgb(80, 60, 40),
                 position=(x, 0, z),
                 scale=(scale*0.2, scale, scale*0.2)
             )
             foliage = Entity(
-                model='cone',
+                model=Cone(resolution=8),
                 color=color.rgb(200, 210, 220),
                 position=(x, scale*0.8, z),
                 scale=(scale*0.5, scale*0.6, scale*0.5)
@@ -288,7 +286,6 @@ class BeachScene(EnvironmentScene):
         
         water = Entity(
             model='plane',
-            texture='water',
             color=color.rgb(30, 140, 210),
             position=(0, -0.05, -30),
             scale=(120, 1, 80),
@@ -297,7 +294,7 @@ class BeachScene(EnvironmentScene):
         )
         self.add_entity(water)
         
-        sky = Sky(texture='sky_cloudy')
+        sky = Sky(color=color.rgb(180, 200, 255))
         self.add_entity(sky)
         
         for angle in range(-60, 61, 20):
