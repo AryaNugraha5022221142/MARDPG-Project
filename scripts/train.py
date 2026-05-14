@@ -157,6 +157,10 @@ def main():
     
     print(f"Starting training for {num_episodes} episodes...")
 
+    # FIX 2d: Paper trains on four scene types randomly selected each episode.
+    # Define the rotation list here so it can be extended easily.
+    PAPER_SCENES = ['pillars', 'cylinders', 'forest', 'rings']
+
     pbar = tqdm(range(1, num_episodes + 1), desc="Training")
     try:
         for episode in pbar:
@@ -164,6 +168,12 @@ def main():
                 set_lr_scale(agent, 1.0)
             elif episode < warmup_until:
                 set_lr_scale(agent, 0.3)
+
+            # FIX 2e: rotate scene type each episode to match paper's multi-environment
+            # training (Section VI-A).  Only applied when no explicit --scenario is given.
+            if args.scenario is None and hasattr(env, 'set_scene_type'):
+                scene = PAPER_SCENES[episode % len(PAPER_SCENES)]
+                env.set_scene_type(scene)
 
             obs, _ = env.reset()
             if obs.shape[1] != obs_dim:
@@ -307,8 +317,13 @@ def main():
                 avg_sat = current_sat_rate
                 avg_act_std = current_act_std
                 
-                # Use actual sigma for continuous agents (MARDPG/MADDPG)
-                current_sigma = agent.noise[0].sigma if hasattr(agent, 'noise') else 0.0
+                # FIX 5e: read current_sigma from AnnealedGaussianNoise for all agent types
+                if hasattr(agent, 'noise') and hasattr(agent.noise[0], 'current_sigma'):
+                    current_sigma = agent.noise[0].current_sigma
+                elif hasattr(agent, 'noise') and hasattr(agent.noise[0], 'sigma'):
+                    current_sigma = agent.noise[0].sigma
+                else:
+                    current_sigma = 0.0
                 
                 pbar.set_postfix({'Reward': f'{avg_reward:.2f}', 'Success': f'{success_rate:.2f}', 'PathEff': f'{current_path_eff:.2f}', 'Trapped': f'{current_trapped:.2f}'})
                 

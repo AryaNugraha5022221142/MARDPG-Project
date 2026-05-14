@@ -27,10 +27,24 @@ class AdaptiveGaussianNoise:
 
 class MARDPG:
     """
-    Multi-Agent Recurrent Deterministic Policy Gradient (MARDPG)
+    Multi-Agent Recurrent Deterministic Policy Gradient (MARDPG).
+
+    FIX 4: This class was originally designed around a 4-D velocity-command
+    action space (vx, vy, vz, yaw_rate) but the paper and the kinematic
+    environment use a 2-D steering-angle action space (rho, tau).
+    The training script correctly passes action_dim=2; the default here has
+    been changed to 2 to prevent silent misconfiguration when the class is
+    instantiated directly.  If you genuinely need 4-D control (e.g. with
+    QuadcopterEnv), pass action_dim=4 explicitly.
     """
-    def __init__(self, obs_dim: int = 34, action_dim: int = 4, num_agents: int = 3, 
-                 config: Dict[str, Any] = None, device: str = 'cpu', independent_critics: bool = False):
+    def __init__(self, obs_dim: int = 34, action_dim: int = 2,  # FIX 4: default 4→2
+                 num_agents: int = 3,
+                 config: Dict[str, Any] = None, device: str = 'cpu',
+                 independent_critics: bool = False):
+        # FIX 4: Explicit guard so mismatches surface at construction time.
+        assert action_dim in (2, 4), (
+            f"action_dim must be 2 (kinematic steering) or 4 (velocity control), got {action_dim}"
+        )
         self.obs_dim = obs_dim
         self.action_dim = action_dim
         self.num_agents = num_agents
@@ -178,8 +192,14 @@ class MARDPG:
         burn_in = self.seq_len // 4
         masks[:, :burn_in] = 0.0 # Set burn_in steps to 0
         
-        actor_hidden = [self.actor.init_hidden(self.batch_size, self.device) for _ in range(self.num_agents)]
-        critic_hidden = [self.critics[i].init_hidden(self.batch_size, self.device) for i in range(self.num_agents)]
+        # FIX 6d: Dedicated hidden-state tensors per forward-pass phase.
+        # Prevents accidental reuse when new components are added (see audit Risk 5).
+        actor_hidden_target  = [self.actor.init_hidden(self.batch_size, self.device) for _ in range(self.num_agents)]
+        actor_hidden_critic  = [self.actor.init_hidden(self.batch_size, self.device) for _ in range(self.num_agents)]
+        actor_hidden_actor   = [self.actor.init_hidden(self.batch_size, self.device) for _ in range(self.num_agents)]
+        critic_hidden_update = [self.critics[i].init_hidden(self.batch_size, self.device) for i in range(self.num_agents)]
+        critic_hidden_target = [self.critics_target[i].init_hidden(self.batch_size, self.device) for i in range(self.num_agents)]
+        critic_hidden_actor  = [self.critics[i].init_hidden(self.batch_size, self.device) for i in range(self.num_agents)]
         
         # 1. Update Critics
         critic_losses = []
@@ -190,20 +210,20 @@ class MARDPG:
             next_actions_all = []
             for i in range(self.num_agents):
                 agent_next_obs = next_obs[:, :, i, :]
-                next_act, _, _ = self.actor_target(agent_next_obs, actor_hidden[i], agent_idx=i)
+                next_act, _, _ = self.actor_target(agent_next_obs, actor_hidden_target[i], agent_idx=i)
                 next_actions_all.append(next_act)
-            next_actions_all = torch.stack(next_actions_all, dim=2) # (batch, seq_len, num_agents, action_dim)
+            next_actions_all = torch.stack(next_actions_all, dim=2)
             
         for i in range(self.num_agents):
             # Target Q
             with torch.no_grad():
-                target_q_seq, _ = self.critics_target[i](next_obs, next_actions_all, critic_hidden[i], agent_idx=i)
-                target_q_seq = target_q_seq.squeeze(-1) # (batch, seq_len)
+                target_q_seq, _ = self.critics_target[i](next_obs, next_actions_all, critic_hidden_target[i], agent_idx=i)
+                target_q_seq = target_q_seq.squeeze(-1)
                 target_q = rewards[:, :, i] + self.gamma * target_q_seq * (1 - dones[:, :, i])
                 
             # Current Q
-            current_q_seq, _ = self.critics[i](obs, actions, critic_hidden[i], agent_idx=i)
-            current_q = current_q_seq.squeeze(-1) # (batch, seq_len)
+            current_q_seq, _ = self.critics[i](obs, actions, critic_hidden_update[i], agent_idx=i)
+            current_q = current_q_seq.squeeze(-1)
             
             # Critic loss (MSE over sequence with mask)
             loss = F.mse_loss(current_q, target_q, reduction='none')
@@ -221,17 +241,21 @@ class MARDPG:
             self.critic_optimizers[i].step()
             
         # 2. Update Actor
+        actor_loss = 0
+
+        # FIX 3c: Freeze critic parameters before actor backward to prevent
+        # gradient leakage into critic.parameters().grad (see audit Risk 4).
         for i in range(self.num_agents):
             for p in self.critics[i].parameters():
                 p.requires_grad_(False)
-                
-        actor_loss = 0
+
         for i in range(self.num_agents):
             # Only recompute agent i's action from current policy
             agent_i_obs = obs[:, :, i, :]
-            agent_i_act, _, _ = self.actor(agent_i_obs, actor_hidden[i], agent_idx=i)
+            # FIX 6f: gradient-carrying forward uses actor_hidden_actor[i]
+            agent_i_act, _, _ = self.actor(agent_i_obs, actor_hidden_actor[i], agent_idx=i)
             
-            # Build joint action: agent i from current policy, others from dict
+            # Build joint action: agent i from current policy, others detached
             other_acts = []
             for j in range(self.num_agents):
                 if j == i:
@@ -239,14 +263,15 @@ class MARDPG:
                 else:
                     agent_j_obs = obs[:, :, j, :]
                     with torch.no_grad():
-                        a_j, _, _ = self.actor(agent_j_obs, actor_hidden[j], agent_idx=j)
-                    other_acts.append(a_j.detach())  # detach — no grad for j!=i
+                        # FIX 6f: non-gradient agents use actor_hidden_critic[j]
+                        a_j, _, _ = self.actor(agent_j_obs, actor_hidden_critic[j], agent_idx=j)
+                    other_acts.append(a_j.detach())
             
             # Stack: (batch, seq, N, dim)
             joint_actions = torch.stack(other_acts, dim=2)
             
-            # Use stored critic state for actor gradient calculation
-            q_values, _ = self.critics[i](obs, joint_actions, critic_hidden[i], agent_idx=i)
+            # FIX 6f: dedicated critic hidden for actor Q-value computation
+            q_values, _ = self.critics[i](obs, joint_actions, critic_hidden_actor[i], agent_idx=i)
             q_values = q_values.squeeze(-1) # (batch, seq)
             
             # Actor loss with mask
@@ -259,7 +284,8 @@ class MARDPG:
         actor_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
         self.actor_optimizer.step()
-        
+
+        # FIX 3d: Re-enable critic gradients for the next update cycle.
         for i in range(self.num_agents):
             for p in self.critics[i].parameters():
                 p.requires_grad_(True)
