@@ -36,7 +36,7 @@ def _make_agent(agent_type, obs_dim, action_dim, num_agents, config, device):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', type=str, default='config/config.yaml', help='Path to config file')
+    parser.add_argument('--config', type=str, default='config/config_baseline.yaml', help='Path to config file')
     parser.add_argument('--run-name', type=str, default='mardpg_run', help='Name of the run')
     parser.add_argument('--agent', type=str, default='mardpg_baseline', choices=['mardpg', 'iddpg', 'mardpg_g', 'mardpg_baseline'], help='Agent type to train')
     parser.add_argument('--scenario', type=str, default=None, help='Scenario name (e.g., urban_canyon, search_and_rescue)')
@@ -109,14 +109,6 @@ def main():
     recent_collisions = deque(maxlen=100)
     recent_collisions_per_agent = deque(maxlen=100)
     
-    # Curriculum Learning (Env level only, no agent count scaling)
-    curriculum_level = 0
-    # require adaptive sustained success before advancing
-    min_episodes_per_level = 2000
-    episodes_at_level = 0
-    env_curriculum_locked = False
-    env_curriculum_lock_until = 0
-
     current_num_agents = config['training']['num_agents']
     
     def set_lr_scale(agent, scale):
@@ -141,7 +133,6 @@ def main():
     env = QuadcopterKinematicEnv(num_agents=current_num_agents, config=env_config_start,
                         render_mode='human' if args.render else None,
                         scenario=args.scenario)
-    env.set_curriculum_level(curriculum_level)
     agent = _make_agent(args.agent, obs_dim, 2, current_num_agents, config, device)
     
     # Academic Data Tracking
@@ -284,34 +275,6 @@ def main():
             current_collision_rate = np.mean(recent_collisions) if len(recent_collisions) > 0 else 0.0
             current_sat_rate = np.mean(recent_sat_rates) if len(recent_sat_rates) > 0 else 0.0
             current_act_std = np.mean(recent_act_stds) if len(recent_act_stds) > 0 else 0.0
-    
-            # Update Curriculum
-    
-            episodes_at_level += 1
-            
-            if env_curriculum_locked:
-                if episode >= env_curriculum_lock_until or (len(recent_success) == 100 and current_success_rate > 0.50):
-                    env_curriculum_locked = False
-                    
-            if episode % 100 == 0:
-                adjusted_success_threshold = 0.40 * (0.85 ** max(0, current_num_agents - 3))
-                ready = (
-                    not env_curriculum_locked
-                    and len(recent_success) == 100
-                    and current_success_rate >= adjusted_success_threshold
-                    and current_collision_rate < 0.30   # also require collision < 30%
-                    and curriculum_level < 6
-                    and episodes_at_level >= min_episodes_per_level
-                )
-                if ready:
-                    curriculum_level += 1
-                    episodes_at_level = 0
-                    env.set_curriculum_level(curriculum_level)
-                    if hasattr(agent.memory, 'clear'):
-                        agent.memory.clear()
-                        print(f"Curriculum Level Up! Level: {curriculum_level}. Buffer cleared.")
-                    recent_success.clear()
-                    recent_collisions.clear()
             
             if episode % config['logging']['log_interval'] == 0:
                 avg_reward = current_avg_reward
@@ -324,13 +287,12 @@ def main():
                 # Use actual sigma for continuous agents (MARDPG/MADDPG)
                 current_sigma = agent.noise[0].sigma if hasattr(agent, 'noise') else 0.0
                 
-                pbar.set_postfix({'Level': curriculum_level, 'Reward': f'{avg_reward:.2f}', 'Success': f'{success_rate:.2f}', 'Sigma': f'{current_sigma:.3f}', 'Steps': global_step_count})
+                pbar.set_postfix({'Reward': f'{avg_reward:.2f}', 'Success': f'{success_rate:.2f}', 'Sigma': f'{current_sigma:.3f}', 'Steps': global_step_count})
                 
                 if use_wandb:
                     log_data = {
                         'episode': episode,
                         'global_steps': global_step_count,
-                        'curriculum_level': curriculum_level,
                         'avg_reward': avg_reward,
                         'success_rate': success_rate,
                         'avg_ep_length': avg_length,

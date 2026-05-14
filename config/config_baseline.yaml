@@ -30,6 +30,7 @@ targets:
   update_rate: 0.01
 
 environment:
+  action_bound: 0.5235987756
   arena_size: [30, 30, 60]
   num_obstacles: 0
   max_velocity: 5.0
