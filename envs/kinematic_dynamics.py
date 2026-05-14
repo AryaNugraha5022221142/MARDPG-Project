@@ -27,34 +27,35 @@ class KinematicDynamics:
         """
         action: [rho, tau] direct steering angle increments.
         rho updates horizontal/yaw angle; tau updates vertical/pitch angle.
-        M is unused for direct kinematic stepping.
+        M is the number of inner steps.
         """
-        rho = float(action[0])
-        tau = float(action[1])
+        rho_step = float(action[0]) / M
+        tau_step = float(action[1]) / M
 
-        self.state[5] += rho
-        self.state[4] += tau
+        for _ in range(M):
+            self.state[5] += rho_step
+            self.state[4] += tau_step
 
-        self.state[5] = (self.state[5] + np.pi) % (2 * np.pi) - np.pi
-        self.state[4] = np.clip(self.state[4], -np.pi / 2, np.pi / 2)
+            self.state[5] = (self.state[5] + np.pi) % (2 * np.pi) - np.pi
+            self.state[4] = np.clip(self.state[4], -np.pi / 2, np.pi / 2)
 
-        yaw = self.state[5]
-        pitch = self.state[4]
+            yaw = self.state[5]
+            pitch = self.state[4]
 
-        vx = self.v * np.cos(pitch) * np.cos(yaw)
-        vy = self.v * np.cos(pitch) * np.sin(yaw)
-        vz = self.v * np.sin(pitch)
+            vx = self.v * np.cos(pitch) * np.cos(yaw)
+            vy = self.v * np.cos(pitch) * np.sin(yaw)
+            vz = self.v * np.sin(pitch)
 
-        self.state[6] = vx
-        self.state[7] = vy
-        self.state[8] = vz
+            self.state[6] = vx
+            self.state[7] = vy
+            self.state[8] = vz
 
-        self.state[0] += vx
-        self.state[1] += vy
-        self.state[2] += vz
+            self.state[0] += vx * self.dt
+            self.state[1] += vy * self.dt
+            self.state[2] += vz * self.dt
 
         self.state[9] = 0.0
-        self.state[10] = tau
-        self.state[11] = rho
+        self.state[10] = tau_step * M
+        self.state[11] = rho_step * M
 
         return self.state.copy()

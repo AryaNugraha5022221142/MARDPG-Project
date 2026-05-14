@@ -7,14 +7,15 @@ from typing import Tuple
 class ActorLSTM(nn.Module):
     """
     LSTM-based Actor network shared across all agents.
-    Outputs continuous actions in [-3.5, 3.5].
+    Outputs continuous actions in [-action_limit, action_limit].
+    Implements a shared base network (Conv2d + State FC) with per-agent LSTM and output heads.
     """
     def __init__(
         self,
-        input_dim: int = 38,
+        input_dim: int = 30,
         hidden_dim: int = 128,
         num_layers: int = 1,
-        output_dim: int = 4,
+        output_dim: int = 4, # Used as action_dim
         dropout: float = 0.1,
         num_agents: int = 3,
         action_limit: float = 2.5,
@@ -25,10 +26,17 @@ class ActorLSTM(nn.Module):
         self.num_agents = num_agents
         self.action_limit = float(action_limit)
         
-        self.fc_embed = nn.Linear(input_dim, hidden_dim)  # Eq. 3.25
-        self.lstm = nn.LSTM(hidden_dim, hidden_dim, num_layers, batch_first=True)
-        self.fc1 = nn.Linear(hidden_dim, 256)
-        self.fc2 = nn.Linear(256, 128)
+        # Shared lower layers
+        self.conv = nn.Conv2d(in_channels=1, out_channels=16, kernel_size=2, stride=1)
+        state_dim = input_dim - 25
+        self.fc_state1 = nn.Linear(state_dim, 32)
+        self.fc_state2 = nn.Linear(32, 8)
+        self.fusion_dim = 16 * 16 + 8
+        
+        # Per-agent upper layers
+        self.lstms = nn.ModuleList([nn.LSTM(self.fusion_dim, hidden_dim, num_layers, batch_first=True) for _ in range(num_agents)])
+        self.fc1s = nn.ModuleList([nn.Linear(hidden_dim, 256) for _ in range(num_agents)])
+        self.fc2s = nn.ModuleList([nn.Linear(256, 128) for _ in range(num_agents)])
         self.output_heads = nn.ModuleList([nn.Linear(128, output_dim) for _ in range(num_agents)])
 
     def init_hidden(self, batch_size: int = 1, device: str = 'cpu') -> Tuple[torch.Tensor, torch.Tensor]:
@@ -46,21 +54,32 @@ class ActorLSTM(nn.Module):
         if is_single_step:
             x = x.unsqueeze(1) # (batch, 1, input_dim)
             
-        if hidden is None:
-            hidden = self.init_hidden(x.size(0), x.device)
-            
-        x = F.relu(self.fc_embed(x))         # embed before LSTM
-        out, hidden = self.lstm(x, hidden)
+        b, s, _ = x.shape
+        ranges = x[:, :, :25].contiguous().view(b * s, 1, 5, 5)
+        state_vec = x[:, :, 25:].contiguous().view(b * s, -1)
         
-        # Process all time steps for sequence training
-        x = F.relu(self.fc1(out))
-        x = F.relu(self.fc2(x))
-        actions = self.action_limit * torch.tanh(self.output_heads[agent_idx](x))
+        c_out = F.relu(self.conv(ranges))
+        c_out = c_out.view(b * s, -1)
+        
+        st_out = F.relu(self.fc_state1(state_vec))
+        st_out = F.relu(self.fc_state2(st_out))
+        
+        fused = torch.cat([c_out, st_out], dim=1).view(b, s, -1)
+
+        if hidden is None:
+            hidden = self.init_hidden(b, x.device)
+            
+        out, hidden = self.lstms[agent_idx](fused, hidden)
+        
+        lstm_out = out
+        out = F.relu(self.fc1s[agent_idx](out))
+        out = F.relu(self.fc2s[agent_idx](out))
+        actions = self.action_limit * torch.tanh(self.output_heads[agent_idx](out))
         
         if is_single_step:
             actions = actions.squeeze(1)
             
-        return actions, hidden, out
+        return actions, hidden, lstm_out
 
 class CriticLSTM(nn.Module):
     """
@@ -119,7 +138,7 @@ class Actor(nn.Module):
     """
     def __init__(
         self,
-        input_dim: int = 38,
+        input_dim: int = 30,
         hidden_dim: int = 256,
         output_dim: int = 4,
         dropout: float = 0.2,

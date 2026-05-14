@@ -108,6 +108,8 @@ def main():
     recent_lengths = deque(maxlen=100)
     recent_collisions = deque(maxlen=100)
     recent_collisions_per_agent = deque(maxlen=100)
+    recent_trapped = deque(maxlen=100)
+    recent_path_eff = deque(maxlen=100)
     
     current_num_agents = config['training']['num_agents']
     
@@ -187,6 +189,10 @@ def main():
             episode_action_smoothness = []
             episode_min_agent_distances = []
             
+            straight_line_dists = [np.linalg.norm(env.agents[i].state[0:3] - env.goals[i]) for i in range(current_num_agents)]
+            trajectory_lengths = [0.0 for _ in range(current_num_agents)]
+            prev_positions = [env.agents[i].state[0:3].copy() for i in range(current_num_agents)]
+            
             while not done:
                 if args.render:
                     env.render()
@@ -204,6 +210,11 @@ def main():
                 episode_act_stds.append(np.std(actions))
                     
                 next_obs, rewards, terminated, truncated, info = env.step(actions)
+                
+                for i in range(current_num_agents):
+                    curr_pos = env.agents[i].state[0:3]
+                    trajectory_lengths[i] += np.linalg.norm(curr_pos - prev_positions[i])
+                    prev_positions[i] = curr_pos.copy()
                 
                 episode_tracking_errors.append(info.get('tracking_error', 0.0))
                 episode_action_smoothness.append(info.get('action_smoothness', 0.0))
@@ -249,6 +260,16 @@ def main():
             recent_sat_rates.append(np.mean(episode_sat_rates))
             recent_act_stds.append(np.mean(episode_act_stds))
             
+            agent_success = info.get('agent_success', np.zeros(current_num_agents, dtype=bool))
+            agent_collision = info.get('agent_collision', np.zeros(current_num_agents, dtype=bool))
+            agent_trapped = ~(agent_success | agent_collision)
+
+            path_eff = np.sum(straight_line_dists) / max(np.sum(trajectory_lengths), 1e-5)
+            trapped_rate = np.sum(agent_trapped) / current_num_agents
+            
+            recent_trapped.append(trapped_rate)
+            recent_path_eff.append(path_eff)
+            
             reward_history.append(episode_reward)
             success_history.append(info.get('individual_success_rate', 0.0))
             length_history.append(episode_length)
@@ -275,6 +296,8 @@ def main():
             current_collision_rate = np.mean(recent_collisions) if len(recent_collisions) > 0 else 0.0
             current_sat_rate = np.mean(recent_sat_rates) if len(recent_sat_rates) > 0 else 0.0
             current_act_std = np.mean(recent_act_stds) if len(recent_act_stds) > 0 else 0.0
+            current_trapped = np.mean(recent_trapped) if len(recent_trapped) > 0 else 0.0
+            current_path_eff = np.mean(recent_path_eff) if len(recent_path_eff) > 0 else 0.0
             
             if episode % config['logging']['log_interval'] == 0:
                 avg_reward = current_avg_reward
@@ -287,7 +310,7 @@ def main():
                 # Use actual sigma for continuous agents (MARDPG/MADDPG)
                 current_sigma = agent.noise[0].sigma if hasattr(agent, 'noise') else 0.0
                 
-                pbar.set_postfix({'Reward': f'{avg_reward:.2f}', 'Success': f'{success_rate:.2f}', 'Sigma': f'{current_sigma:.3f}', 'Steps': global_step_count})
+                pbar.set_postfix({'Reward': f'{avg_reward:.2f}', 'Success': f'{success_rate:.2f}', 'PathEff': f'{current_path_eff:.2f}', 'Trapped': f'{current_trapped:.2f}'})
                 
                 if use_wandb:
                     log_data = {
@@ -297,6 +320,8 @@ def main():
                         'success_rate': success_rate,
                         'avg_ep_length': avg_length,
                         'collision_rate': collision_rate,
+                        'trapped_rate': current_trapped,
+                        'path_efficiency': current_path_eff,
                         'sigma': current_sigma,
                         'sat_rate': avg_sat,
                         'action_std': avg_act_std

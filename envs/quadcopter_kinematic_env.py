@@ -47,8 +47,7 @@ class QuadcopterKinematicEnv:
         self.cooperative = config.get('cooperative', False)
         self.rate_limit_per_step = config.get('rate_limit_per_step', 1.0)
         self.action_bound = float(config.get('action_bound', np.pi / 6.0))
-        self.agent_id_dim = int(config.get('agent_id_dim', self.num_agents))
-        self.obs_dim = 25 + 5 + 3 + 1 + 2 + self.agent_id_dim
+        self.obs_dim = 30
         
         self.arena_diagonal = np.linalg.norm(self.arena_size)
         self.constant_velocity = float(config.get('constant_velocity', 2.0))
@@ -378,30 +377,9 @@ class QuadcopterKinematicEnv:
             goal_pitch = np.arctan2(rel_pos[2], np.sqrt(rel_pos[0]**2 + rel_pos[1]**2))
             phi_goal = goal_pitch - pitch
             
-            cos_y, sin_y = np.cos(yaw), np.sin(yaw)
-            cos_p, sin_p = np.cos(pitch), np.sin(pitch)
-
-            v_forward = state[6] * cos_y + state[7] * sin_y
-            vx_body = cos_p * v_forward + sin_p * state[8]
-            vy_body = -state[6] * sin_y + state[7] * cos_y
-            vz_body = -sin_p * v_forward + cos_p * state[8]
-
-            vel_norm = np.clip(np.array([vx_body, vy_body, vz_body]) / 5.0, -1.0, 1.0)
-            
-            # Saturation indicator (Bug 14)
-            is_saturated = float(getattr(self.agents[i], 'is_saturated', False))
-            
-            agent_id_onehot = np.zeros(self.agent_id_dim, dtype=np.float32)
-            if i < self.agent_id_dim:
-                agent_id_onehot[i] = 1.0
-            
             obs = np.concatenate([
                 ranges_norm,
-                [dist_norm, np.sin(theta_goal), np.cos(theta_goal), np.sin(phi_goal), np.cos(phi_goal)],
-                vel_norm,
-                [is_saturated],
-                self.prev_actions[i] / self.action_bound,
-                agent_id_onehot
+                [dist_norm, np.sin(theta_goal), np.cos(theta_goal), np.sin(phi_goal), np.cos(phi_goal)]
             ])
             obs_all.append(obs)
             

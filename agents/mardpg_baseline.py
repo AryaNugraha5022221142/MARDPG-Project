@@ -8,37 +8,33 @@ from typing import List, Tuple, Dict, Any
 
 from .replay_buffer import SequenceReplayBuffer
 
-class ActorLSTMBaseline(nn.Module):
-    """
-    LSTM-based Actor applying Baseline specifications:
-    - CNN for 25 rangefinders
-    - FC for state vector
-    - Fusion into LSTM
-    - Tanh output to produce 2 continuous steering signals [rho, tau]
-    - Actions are scaled to [-action_bound, action_bound] for the kinematic env
-    """
-    def __init__(self, obs_dim_total: int, hidden_dim: int = 128, device: str = 'cpu', action_bound: float = 2.5):
+class MARDPGBaseNetwork(nn.Module):
+    def __init__(self, state_dim: int):
         super().__init__()
-        self.device = device
+        self.conv = nn.Conv2d(in_channels=1, out_channels=16, kernel_size=2, stride=1)
+        self.fc_state1 = nn.Linear(state_dim, 32)
+        self.fc_state2 = nn.Linear(32, 8)
+        self.fusion_dim = 16 * 16 + 8  # 4x4 output spatial size * 16 channels
+
+    def forward(self, ranges: torch.Tensor, state_vec: torch.Tensor):
+        b, s, _ = ranges.shape
+        ranges_2d = ranges.contiguous().view(b * s, 1, 5, 5)
+        c_out = F.relu(self.conv(ranges_2d))
+        c_out = c_out.view(b * s, -1)
+
+        state_vec_flat = state_vec.contiguous().view(b * s, -1)
+        st_out = F.relu(self.fc_state1(state_vec_flat))
+        st_out = F.relu(self.fc_state2(st_out))
+
+        fused = torch.cat([c_out, st_out], dim=1).view(b, s, -1)
+        return fused
+
+class ActorLSTMAgentHead(nn.Module):
+    def __init__(self, fusion_dim: int, hidden_dim: int, action_bound: float):
+        super().__init__()
         self.hidden_dim = hidden_dim
         self.action_bound = action_bound
-        
-        # Rangefinders (25 values) -> CNN
-        # Input shape: (batch*seq, 1, 25)
-        self.conv1 = nn.Conv1d(in_channels=1, out_channels=8, kernel_size=3, stride=1, padding=1)
-        self.conv2 = nn.Conv1d(in_channels=8, out_channels=16, kernel_size=3, stride=1, padding=1)
-        
-        # State vector
-        self.state_dim = obs_dim_total - 25
-        self.fc_state1 = nn.Linear(self.state_dim, 32)
-        self.fc_state2 = nn.Linear(32, 8)
-        
-        # Fusion: 25 * 16 = 400 from CNN + 8 from State = 408
-        self.fusion_dim = 400 + 8
-        self.lstm = nn.LSTM(self.fusion_dim, hidden_dim, num_layers=1, batch_first=True)
-        
-        # Output layer with tanh
-        # We output 2 steering signals: rho (yaw) and tau (pitch)
+        self.lstm = nn.LSTM(fusion_dim, hidden_dim, num_layers=1, batch_first=True)
         self.output_head = nn.Linear(hidden_dim, 2)
 
     def init_hidden(self, batch_size: int = 1, device: str = 'cpu'):
@@ -46,63 +42,49 @@ class ActorLSTMBaseline(nn.Module):
         c0 = torch.zeros(1, batch_size, self.hidden_dim).to(device)
         return (h0, c0)
 
-    def forward(self, x: torch.Tensor, hidden: Tuple[torch.Tensor, torch.Tensor] = None):
-        is_single_step = x.dim() == 2
-        if is_single_step:
-            x = x.unsqueeze(1) # (batch, 1, input_dim)
-            
-        b, s, d = x.shape
-        ranges = x[:, :, :25].contiguous().view(b * s, 1, 25)
-        state_vec = x[:, :, 25:].contiguous().view(b * s, -1)
-        
-        # CNN Branch
-        c_out = F.relu(self.conv1(ranges))
-        c_out = F.relu(self.conv2(c_out))
-        c_out = c_out.view(b * s, -1) # 400
-        
-        # State Branch
-        st_out = F.relu(self.fc_state1(state_vec))
-        st_out = F.relu(self.fc_state2(st_out)) # 8
-        
-        # Fusion
-        fused = torch.cat([c_out, st_out], dim=1).view(b, s, -1)
-        
-        if hidden is None:
-            hidden = self.init_hidden(b, x.device)
-            
+    def forward(self, fused: torch.Tensor, hidden: Tuple[torch.Tensor, torch.Tensor] = None):
         out, hidden = self.lstm(fused, hidden)
-        
-        # Tanh activation to produce normalized action signals [-1, 1]
         logits = self.output_head(out)
-        norm_out = torch.tanh(logits) # (batch, seq, 2)
-        
+        norm_out = torch.tanh(logits)
         actions = self.action_bound * norm_out
         rho = actions[:, :, 0]
         tau = actions[:, :, 1]
+        return actions, hidden, out, (rho, tau)
+
+class MultiActorLSTMBaseline(nn.Module):
+    """
+    Implements a shared base network with per-agent LSTM and output heads.
+    """
+    def __init__(self, obs_dim_total: int, num_agents: int = 3, hidden_dim: int = 128, device: str = 'cpu', action_bound: float = 2.5):
+        super().__init__()
+        self.num_agents = num_agents
+        state_dim = obs_dim_total - 25
+        self.shared_base = MARDPGBaseNetwork(state_dim)
+        self.heads = nn.ModuleList([ActorLSTMAgentHead(self.shared_base.fusion_dim, hidden_dim, action_bound) for _ in range(num_agents)])
+
+    def init_hidden(self, batch_size: int = 1, device: str = 'cpu'):
+        return self.heads[0].init_hidden(batch_size, device)
+
+    def forward(self, x: torch.Tensor, hidden: Tuple[torch.Tensor, torch.Tensor] = None, agent_idx: int = 0):
+        is_single_step = x.dim() == 2
+        if is_single_step:
+            x = x.unsqueeze(1) # (batch, 1, input_dim)
+
+        ranges = x[:, :, :25]
+        state_vec = x[:, :, 25:]
+        fused = self.shared_base(ranges, state_vec)
+
+        if hidden is None:
+            hidden = self.init_hidden(x.size(0), x.device)
+
+        actions, hidden_out, lstm_out, (rho, tau) = self.heads[agent_idx](fused, hidden)
         
         if is_single_step:
             actions = actions.squeeze(1)
             rho = rho.squeeze(1)
             tau = tau.squeeze(1)
-            
-        return actions, hidden, out, (rho, tau)
 
-
-class MultiActorLSTMBaseline(nn.Module):
-    """
-    Wraps multiple independent ActorLSTMBaseline modules to maintain compatibility
-    with external scripts that expect a single 'agent.actor' object.
-    """
-    def __init__(self, obs_dim_total: int, num_agents: int = 3, hidden_dim: int = 128, device: str = 'cpu', action_bound: float = 2.5):
-        super().__init__()
-        self.num_agents = num_agents
-        self.models = nn.ModuleList([ActorLSTMBaseline(obs_dim_total, hidden_dim, device, action_bound) for _ in range(num_agents)])
-        
-    def init_hidden(self, batch_size: int = 1, device: str = 'cpu'):
-        return self.models[0].init_hidden(batch_size, device)
-        
-    def forward(self, x: torch.Tensor, hidden: Tuple[torch.Tensor, torch.Tensor] = None, agent_idx: int = 0):
-        return self.models[agent_idx](x, hidden)
+        return actions, hidden_out, lstm_out, (rho, tau)
 
 class CriticLSTMBaseline(nn.Module):
     """
@@ -145,7 +127,7 @@ class MARDPG_Baseline:
     """
     MARDPG Baseline Implementation (as specified)
     """
-    def __init__(self, obs_dim: int = 41, action_dim: int = 2, num_agents: int = 3, 
+    def __init__(self, obs_dim: int = 30, action_dim: int = 2, num_agents: int = 3, 
                  config: Dict[str, Any] = None, device: str = 'cpu', independent_critics: bool = False):
         self.obs_dim = obs_dim
         self.action_dim = action_dim # Kinematic env action dim is 2: [rho, tau]
