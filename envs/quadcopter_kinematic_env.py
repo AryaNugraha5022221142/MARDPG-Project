@@ -572,7 +572,7 @@ class QuadcopterKinematicEnv:
                 r_trans = alpha * (old_dist_to_goal - dist_to_goal)
                 r_col = -lam * np.exp(-sigma * max(d_min, 0.0))
 
-                forward_clear = self.forward_ranges[i] >= self.max_range
+                forward_clear = self.forward_ranges[i] >= 0.99 * self.max_range
                 r_free = r_free_const if forward_clear else 0.0
 
                 dense_r = d1 * r_trans + d2 * r_col + d3 * r_free + d4 * r_step
