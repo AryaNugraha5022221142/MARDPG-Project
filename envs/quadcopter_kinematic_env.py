@@ -129,15 +129,14 @@ class QuadcopterKinematicEnv:
     # ------------------------------------------------------------------
 
     def _generate_pillars(self):
-        """Scene-I: randomly placed square-column (box) obstacles."""
-        import matplotlib.pyplot as plt
+        """Scene-I: square-column (box) obstacles."""
         self.obstacles = []
         attempts = 0
         n_obs = self.num_obstacles * 2
         while len(self.obstacles) < n_obs and attempts < 1000:
             attempts += 1
-            w = np.random.uniform(1.5, 4.0)
-            h = np.random.uniform(2.0, self.arena_size[2] * 0.8)
+            w = np.random.uniform(2.0, 5.0)
+            h = np.random.uniform(5.0, self.arena_size[2] * 0.8)
             pos = np.array([
                 np.random.uniform(5.0, self.arena_size[0] - 5.0),
                 np.random.uniform(5.0, self.arena_size[1] - 5.0),
@@ -145,23 +144,20 @@ class QuadcopterKinematicEnv:
             ])
             size = np.array([w, w, h])
             if self._check_valid(pos, size=size, is_sphere=False):
-                col = plt.cm.jet(np.random.rand())[:3]
                 self.obstacles.append({
                     'type': 'box', 'pos': pos, 'size': size,
-                    'vel': np.zeros(3), 'origin': pos.copy(), 'phase': 0.0, 'freq': 0.0,
-                    'color': col
+                    'vel': np.zeros(3), 'origin': pos.copy(), 'phase': 0.0, 'freq': 0.0
                 })
 
     def _generate_cylinders(self):
         """Scene-II: cylindrical obstacles (modeled as boxes for physics)."""
-        import matplotlib.pyplot as plt
         self.obstacles = []
         attempts = 0
         n_obs = self.num_obstacles * 3
         while len(self.obstacles) < n_obs and attempts < 1000:
             attempts += 1
-            r = np.random.uniform(1.0, 2.5)
-            h = np.random.uniform(3.0, self.arena_size[2] * 0.9)
+            r = np.random.uniform(1.5, 3.0)
+            h = np.random.uniform(5.0, self.arena_size[2] * 0.9)
             pos = np.array([
                 np.random.uniform(5.0, self.arena_size[0] - 5.0),
                 np.random.uniform(5.0, self.arena_size[1] - 5.0),
@@ -169,71 +165,53 @@ class QuadcopterKinematicEnv:
             ])
             size = np.array([r*2, r*2, h])
             if self._check_valid(pos, size=size, is_sphere=False):
-                col = plt.cm.hsv(np.random.rand())[:3]
                 self.obstacles.append({
                     'type': 'box', 'pos': pos, 'size': size,
                     'vel': np.zeros(3), 'origin': pos.copy(), 'phase': 0.0, 'freq': 0.0,
-                    'color': col, 'is_cylinder': True
+                    'is_cylinder': True, 'radius': r
                 })
 
     def _generate_rings(self):
         """Scene-IV: circular/ring obstacles approximated as box frames."""
-        import matplotlib.pyplot as plt
         self.obstacles = []
-        n_rings = self.num_obstacles
+        n_rings = self.num_obstacles * 2
         attempts = 0
-        while len(self.obstacles) < n_rings * 4 and attempts < 1000:
+        while len(self.obstacles) < n_rings and attempts < 1000:
             attempts += 1
             cx = np.random.uniform(10.0, self.arena_size[0] - 10.0)
             cy = np.random.uniform(10.0, self.arena_size[1] - 10.0)
             cz = np.random.uniform(5.0,  self.arena_size[2] - 5.0)
-            outer_r = np.random.uniform(3.0, 6.0)
-            thickness = 0.8
+            outer_r = np.random.uniform(3.0, 7.0)
+            pos = np.array([cx, cy, cz])
             
-            ring_parts = []
-            valid = True
-            col = plt.cm.jet(np.random.rand())[:3]
-            for angle in [0, np.pi/2, np.pi, 3*np.pi/2]:
-                bx = cx + outer_r * np.cos(angle)
-                by = cy + outer_r * np.sin(angle)
-                pos = np.array([bx, by, cz])
-                if angle in [0, np.pi]:
-                    size = np.array([thickness, outer_r*2, thickness])
-                else:
-                    size = np.array([outer_r*2, thickness, thickness])
-                    
-                if not self._check_valid(pos, size=size, is_sphere=False, clearance=-0.5):
-                    valid = False
-                    break
-                ring_parts.append({
-                    'type': 'box', 'pos': pos, 'size': size,
+            if self._check_valid(pos, radius=outer_r, is_sphere=True, clearance=-0.5):
+                theta = np.random.uniform(0, 2*np.pi)
+                phi = np.random.uniform(0, np.pi)
+                self.obstacles.append({
+                    'type': 'ring', 'pos': pos, 'radius': outer_r,
                     'vel': np.zeros(3), 'origin': pos.copy(), 'phase': 0.0, 'freq': 0.0,
-                    'color': col
+                    'theta': theta, 'phi': phi
                 })
-            
-            if valid:
-                self.obstacles.extend(ring_parts)
 
     def _generate_forest(self):
         """Scene-III: simulated forest — random blobs/irregular shapes."""
-        import matplotlib.pyplot as plt
         self.obstacles = []
         attempts = 0
-        n_trees = self.num_obstacles * 5
+        n_trees = self.num_obstacles * 6
         while len(self.obstacles) < n_trees and attempts < 2000:
             attempts += 1
             pos = np.array([
                 np.random.uniform(2.0, self.arena_size[0] - 2.0),
                 np.random.uniform(2.0, self.arena_size[1] - 2.0),
-                np.random.uniform(0.0, self.arena_size[2] * 0.7)
+                np.random.uniform(1.0, 8.0)
             ])
-            radius = np.random.uniform(1.0, 3.5)
+            radius = np.random.uniform(2.0, 4.5)
+            pos[2] = np.random.uniform(radius, radius*2.5) # keep low
+            
             if self._check_valid(pos, radius=radius, is_sphere=True, clearance=-1.0):
-                col = plt.cm.hsv(np.random.rand())[:3]
                 self.obstacles.append({
-                    'type': 'sphere', 'pos': pos, 'radius': radius,
-                    'vel': np.zeros(3), 'origin': pos.copy(), 'phase': 0.0, 'freq': 0.0,
-                    'color': col
+                    'type': 'blob', 'pos': pos, 'radius': radius,
+                    'vel': np.zeros(3), 'origin': pos.copy(), 'phase': 0.0, 'freq': 0.0
                 })
 
     def _check_valid(self, pos, radius=None, size=None, is_sphere=True, clearance=1.0):
@@ -775,18 +753,27 @@ class QuadcopterKinematicEnv:
         return obs, rewards, terminated, truncated, info
 
     def render(self):
-        """Renders the 3D environment using matplotlib."""
+        """Renders the 3D environment using matplotlib matching paper aesthetics."""
         if self.render_mode != 'human':
             return
             
         import matplotlib.pyplot as plt
+        import matplotlib.cm as cm
         
         if self.fig is None:
             plt.ion()
-            self.fig = plt.figure(figsize=(8, 8))
+            self.fig = plt.figure(figsize=(10, 8))
+            self.fig.patch.set_facecolor('#FAFAC8') # Light yellow background
             self.ax = self.fig.add_subplot(111, projection='3d')
+            self.ax.set_facecolor('#FAFAC8')
             
         self.ax.clear()
+        
+        # Grid settings
+        self.ax.w_xaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
+        self.ax.w_yaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
+        self.ax.w_zaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
+        self.ax.grid(True, color='white', linewidth=0.5, alpha=0.5)
         
         # Set limits
         self.ax.set_xlim(0, self.arena_size[0])
@@ -794,66 +781,107 @@ class QuadcopterKinematicEnv:
         self.ax.set_zlim(0, self.arena_size[2])
         self.ax.set_box_aspect((self.arena_size[0], self.arena_size[1], self.arena_size[2]))
         
-        # Plot ground plane to anchor visual
-        xx, yy = np.meshgrid([0, self.arena_size[0]], [0, self.arena_size[1]])
-        zz = np.zeros_like(xx)
-        self.ax.plot_surface(xx, yy, zz, color='green', alpha=0.1)
-
-        self.ax.set_xlabel('X (m)')
-        self.ax.set_ylabel('Y (m)')
-        self.ax.set_zlabel('Z (m)')
+        # Color mapping helper function
+        def get_color(z):
+            norm = np.clip(z / self.arena_size[2], 0.0, 1.0)
+            # Hue from 0 (red) to 0.8 (magenta)
+            return cm.hsv(0.8 * norm)
         
         # Status indicators
-        status_text = f'Step: {self.step_count}'
+        status_text = f'Step: {self.step_count} | Scene: {getattr(self, "_current_scene_type", "pillars")}'
         if hasattr(self, 'last_info'):
             if self.last_info.get('collision'):
                 status_text += " | COLLISION! 💥"
-                self.ax.set_facecolor((1.0, 0.9, 0.9)) # Light red background
             elif self.last_info.get('success'):
                 status_text += " | SUCCESS! 🎯"
-                self.ax.set_facecolor((0.9, 1.0, 0.9)) # Light green background
-            else:
-                self.ax.set_facecolor('white')
-        
         self.ax.set_title(status_text)
         
-        # Draw obstacles (Better 3D representation)
+        # Vectorized drawing for performance
+        x_bars, y_bars, z_bars, dx_bars, dy_bars, dz_bars, c_bars = [], [], [], [], [], [], []
+        x_pts, y_pts, z_pts, s_pts, c_pts = [], [], [], [], []
+        
+        # Draw obstacles highly optimized
         for obs in self.obstacles:
             p = obs['pos']
-            alpha = obs.get('alpha', 0.8)
-            color = obs.get('color', 'gray')
-            if obs['type'] == 'sphere':
-                self.ax.scatter(p[0], p[1], p[2], color=color, s=(obs['radius']*20)**2, alpha=alpha)
-            else:
+            if obs['type'] == 'box':
                 s = obs['size']
-                if obs.get('is_cylinder', False):
-                    z_bottom = p[2] - s[2]/2
-                    self.ax.bar3d(p[0]-s[0]/2, p[1]-s[1]/2, z_bottom, s[0], s[1], s[2], color=color, alpha=alpha)
+                is_cyl = obs.get('is_cylinder', False)
+                # Create bands: paper uses ~1 unit thick bands
+                n_bands = max(3, int(s[2] / 1.5))
+                band_h = s[2] / n_bands
+                
+                if is_cyl:
+                    for i in range(n_bands):
+                        z_bot = p[2] - s[2]/2 + i*band_h
+                        x_pts.append(p[0])
+                        y_pts.append(p[1])
+                        z_pts.append(z_bot + band_h/2)
+                        s_pts.append(((s[0]/2)*35)**2)
+                        c_pts.append(get_color(z_bot + band_h/2))
                 else:
-                    z_bottom = p[2] - s[2]/2
-                    self.ax.bar3d(p[0]-s[0]/2, p[1]-s[1]/2, z_bottom, s[0], s[1], s[2], color=color, alpha=alpha)
+                    for i in range(n_bands):
+                        z_bot = p[2] - s[2]/2 + i*band_h
+                        x_bars.append(p[0] - s[0]/2)
+                        y_bars.append(p[1] - s[1]/2)
+                        z_bars.append(z_bot)
+                        dx_bars.append(s[0])
+                        dy_bars.append(s[1])
+                        dz_bars.append(band_h * 0.95) # Tiny gap for banding
+                        c_bars.append(get_color(z_bot + band_h/2))
+            
+            elif obs['type'] == 'blob' or obs['type'] == 'sphere':
+                r = obs['radius']
+                x_pts.append(p[0])
+                y_pts.append(p[1])
+                z_pts.append(p[2])
+                s_pts.append((r*40)**2)  # Adjust scaling factor visually
+                c_pts.append(get_color(p[2]))
+                
+            elif obs['type'] == 'ring':
+                r = obs['radius']
+                t = np.linspace(0, 2*np.pi, 60)
+                cx = r * np.cos(t)
+                cy = r * np.sin(t)
+                cz = np.zeros_like(t)
+                
+                phi, theta = obs['phi'], obs['theta']
+                Rx = np.array([[1, 0, 0], [0, np.cos(phi), -np.sin(phi)], [0, np.sin(phi), np.cos(phi)]])
+                Rz = np.array([[np.cos(theta), -np.sin(theta), 0], [np.sin(theta), np.cos(theta), 0], [0, 0, 1]])
+                R = Rz.dot(Rx)
+                
+                pts = R.dot(np.vstack([cx, cy, cz]))
+                col = get_color(p[2])
+                self.ax.plot(p[0] + pts[0,:], p[1] + pts[1,:], p[2] + pts[2,:], color=col, linewidth=1.5, alpha=0.9)
+                
+        if x_bars:
+            self.ax.bar3d(x_bars, y_bars, z_bars, dx_bars, dy_bars, dz_bars, color=c_bars, shade=True)
+            
+        if x_pts:
+            self.ax.scatter(x_pts, y_pts, z_pts, c=c_pts, s=s_pts, edgecolors='none', alpha=0.9)
             
         # Draw goals and agents
         colors = ['red', 'green', 'blue', 'orange', 'purple', 'cyan']
         for i in range(self.num_agents):
+            if self.agent_dones[i]: continue
             c = colors[i % len(colors)]
             goal = self.goals[i]
-            self.ax.scatter(goal[0], goal[1], goal[2], color=c, marker='x', s=100, label=f'Goal {i}')
             
+            # Goal is a diamond/star marker
+            self.ax.scatter(goal[0], goal[1], goal[2], color='black', marker='D', s=80, alpha=0.7)
+            
+            # UAV cross
             pos = self.agents[i].state[0:3]
             yaw = self.agents[i].state[5]
+            arm = 1.0
+            dx, dy = arm * np.cos(yaw), arm * np.sin(yaw)
+            self.ax.plot([pos[0]-dx, pos[0]+dx], [pos[1]-dy, pos[1]+dy], [pos[2], pos[2]], color='black', linewidth=1.5)
+            self.ax.plot([pos[0]+dy, pos[0]-dy], [pos[1]-dx, pos[1]+dx], [pos[2], pos[2]], color='black', linewidth=1.5)
+            self.ax.scatter(pos[0], pos[1], pos[2], color=c, marker='o', s=50, edgecolors='black', linewidths=0.5, zorder=10)
             
-            # Draw UAV frame (cross)
-            arm_len = 0.5
-            dx = arm_len * np.cos(yaw)
-            dy = arm_len * np.sin(yaw)
-            self.ax.plot([pos[0]-dx, pos[0]+dx], [pos[1]-dy, pos[1]+dy], [pos[2], pos[2]], color=c, linewidth=2)
-            self.ax.plot([pos[0]+dy, pos[0]-dy], [pos[1]-dx, pos[1]+dx], [pos[2], pos[2]], color=c, linewidth=2)
-            self.ax.scatter(pos[0], pos[1], pos[2], color=c, marker='o', s=30)
-            
-        handles, labels = self.ax.get_legend_handles_labels()
-        by_label = dict(zip(labels, handles))
-        self.ax.legend(by_label.values(), by_label.keys(), loc='upper right', bbox_to_anchor=(1.3, 1.0))
+        # Cleanup view
+        self.ax.set_xticks([])
+        self.ax.set_yticks([])
+        self.ax.set_zticks([])
         
         if getattr(self, 'save_path', None):
             plt.savefig(self.save_path, dpi=150, bbox_inches='tight')
