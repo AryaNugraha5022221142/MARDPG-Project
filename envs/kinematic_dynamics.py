@@ -25,9 +25,9 @@ class KinematicDynamics:
 
     def rl_step(self, action: np.ndarray, M: int = 1):
         """
-        action: [rho, tau] steering signals as angular rates in rad/s.
+        action: [rho, tau] direct steering angle increments.
         rho updates horizontal/yaw angle; tau updates vertical/pitch angle.
-        M: number of inner simulation ticks represented by one outer RL step.
+        M is unused for direct kinematic stepping.
         """
         rho = float(action[0])
         tau = float(action[1])

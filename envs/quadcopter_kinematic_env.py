@@ -408,13 +408,12 @@ class QuadcopterKinematicEnv:
         return np.array(obs_all, dtype=np.float32)
 
     def _get_min_distance(self, agent_idx: int) -> float:
-        """Calculates minimum distance to any obstacle, wall, or other agent."""
+        """Calculates minimum distance to any obstacle, top boundary, or other agent."""
         pos = self.agents[agent_idx].state[0:3]
         min_dist = float('inf')
         
-        # Walls
-        min_dist = min(min_dist, np.min(pos))
-        min_dist = min(min_dist, np.min(self.arena_size - pos))
+        # Top boundary
+        min_dist = min(min_dist, self.arena_size[2] - pos[2])
         
         # Obstacles
         for obs in self.obstacles:
@@ -483,14 +482,6 @@ class QuadcopterKinematicEnv:
             
             action = actions[i].copy()
             prev_action = self.prev_actions[i].copy()
-
-            delta_action = action - prev_action
-            if np.any(np.abs(delta_action) > self.rate_limit_per_step):
-                action = prev_action + np.clip(
-                    delta_action,
-                    -self.rate_limit_per_step,
-                    self.rate_limit_per_step,
-                )
 
             applied_delta = action - prev_action
             if self.step_count > 1:
