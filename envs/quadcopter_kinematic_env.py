@@ -130,80 +130,110 @@ class QuadcopterKinematicEnv:
 
     def _generate_pillars(self):
         """Scene-I: randomly placed square-column (box) obstacles."""
+        import matplotlib.pyplot as plt
         self.obstacles = []
         attempts = 0
-        while len(self.obstacles) < self.num_obstacles and attempts < 1000:
+        n_obs = self.num_obstacles * 2
+        while len(self.obstacles) < n_obs and attempts < 1000:
             attempts += 1
+            w = np.random.uniform(1.5, 4.0)
+            h = np.random.uniform(2.0, self.arena_size[2] * 0.8)
             pos = np.array([
                 np.random.uniform(5.0, self.arena_size[0] - 5.0),
                 np.random.uniform(5.0, self.arena_size[1] - 5.0),
-                self.arena_size[2] / 2.0
+                h / 2.0
             ])
-            w = np.random.uniform(1.0, 3.0)
-            size = np.array([w, w, self.arena_size[2]])  # full-height pillar
+            size = np.array([w, w, h])
             if self._check_valid(pos, size=size, is_sphere=False):
+                col = plt.cm.jet(np.random.rand())[:3]
                 self.obstacles.append({
                     'type': 'box', 'pos': pos, 'size': size,
-                    'vel': np.zeros(3), 'origin': pos.copy(), 'phase': 0.0, 'freq': 0.0
+                    'vel': np.zeros(3), 'origin': pos.copy(), 'phase': 0.0, 'freq': 0.0,
+                    'color': col
                 })
 
     def _generate_cylinders(self):
-        """Scene-II: cylindrical (sphere-approximated) obstacles."""
+        """Scene-II: cylindrical obstacles (modeled as boxes for physics)."""
+        import matplotlib.pyplot as plt
         self.obstacles = []
         attempts = 0
-        while len(self.obstacles) < self.num_obstacles and attempts < 1000:
+        n_obs = self.num_obstacles * 3
+        while len(self.obstacles) < n_obs and attempts < 1000:
             attempts += 1
+            r = np.random.uniform(1.0, 2.5)
+            h = np.random.uniform(3.0, self.arena_size[2] * 0.9)
             pos = np.array([
                 np.random.uniform(5.0, self.arena_size[0] - 5.0),
                 np.random.uniform(5.0, self.arena_size[1] - 5.0),
-                np.random.uniform(1.0, self.arena_size[2] - 1.0)
+                h / 2.0
             ])
-            radius = np.random.uniform(0.5, 1.5)
-            if self._check_valid(pos, radius=radius, is_sphere=True):
+            size = np.array([r*2, r*2, h])
+            if self._check_valid(pos, size=size, is_sphere=False):
+                col = plt.cm.hsv(np.random.rand())[:3]
                 self.obstacles.append({
-                    'type': 'sphere', 'pos': pos, 'radius': radius,
-                    'vel': np.zeros(3), 'origin': pos.copy(), 'phase': 0.0, 'freq': 0.0
+                    'type': 'box', 'pos': pos, 'size': size,
+                    'vel': np.zeros(3), 'origin': pos.copy(), 'phase': 0.0, 'freq': 0.0,
+                    'color': col, 'is_cylinder': True
                 })
 
     def _generate_rings(self):
-        """Scene-IV: torus/ring approximated as hollow box frames."""
+        """Scene-IV: circular/ring obstacles approximated as box frames."""
+        import matplotlib.pyplot as plt
         self.obstacles = []
-        n_rings = min(self.num_obstacles, 10)
-        for _ in range(n_rings):
+        n_rings = self.num_obstacles
+        attempts = 0
+        while len(self.obstacles) < n_rings * 4 and attempts < 1000:
+            attempts += 1
             cx = np.random.uniform(10.0, self.arena_size[0] - 10.0)
             cy = np.random.uniform(10.0, self.arena_size[1] - 10.0)
-            cz = np.random.uniform(3.0,  self.arena_size[2] - 3.0)
-            outer_r = np.random.uniform(2.0, 4.0)
-            thickness = 0.5
-            # Approximate ring with 4 box segments
-            for angle in [0, np.pi / 2, np.pi, 3 * np.pi / 2]:
+            cz = np.random.uniform(5.0,  self.arena_size[2] - 5.0)
+            outer_r = np.random.uniform(3.0, 6.0)
+            thickness = 0.8
+            
+            ring_parts = []
+            valid = True
+            col = plt.cm.jet(np.random.rand())[:3]
+            for angle in [0, np.pi/2, np.pi, 3*np.pi/2]:
                 bx = cx + outer_r * np.cos(angle)
                 by = cy + outer_r * np.sin(angle)
                 pos = np.array([bx, by, cz])
-                size = np.array([thickness * 2, thickness * 2, thickness * 2])
-                self.obstacles.append({
+                if angle in [0, np.pi]:
+                    size = np.array([thickness, outer_r*2, thickness])
+                else:
+                    size = np.array([outer_r*2, thickness, thickness])
+                    
+                if not self._check_valid(pos, size=size, is_sphere=False, clearance=-0.5):
+                    valid = False
+                    break
+                ring_parts.append({
                     'type': 'box', 'pos': pos, 'size': size,
-                    'vel': np.zeros(3), 'origin': pos.copy(), 'phase': 0.0, 'freq': 0.0
+                    'vel': np.zeros(3), 'origin': pos.copy(), 'phase': 0.0, 'freq': 0.0,
+                    'color': col
                 })
+            
+            if valid:
+                self.obstacles.extend(ring_parts)
 
     def _generate_forest(self):
-        """Scene-III: simulated forest — dense thin vertical pillars."""
+        """Scene-III: simulated forest — random blobs/irregular shapes."""
+        import matplotlib.pyplot as plt
         self.obstacles = []
         attempts = 0
-        n_trees = max(self.num_obstacles, 20)
+        n_trees = self.num_obstacles * 5
         while len(self.obstacles) < n_trees and attempts < 2000:
             attempts += 1
             pos = np.array([
-                np.random.uniform(5.0, self.arena_size[0] - 5.0),
-                np.random.uniform(5.0, self.arena_size[1] - 5.0),
-                self.arena_size[2] / 2.0
+                np.random.uniform(2.0, self.arena_size[0] - 2.0),
+                np.random.uniform(2.0, self.arena_size[1] - 2.0),
+                np.random.uniform(0.0, self.arena_size[2] * 0.7)
             ])
-            trunk_w = np.random.uniform(0.2, 0.6)
-            size = np.array([trunk_w, trunk_w, self.arena_size[2]])
-            if self._check_valid(pos, size=size, is_sphere=False):
+            radius = np.random.uniform(1.0, 3.5)
+            if self._check_valid(pos, radius=radius, is_sphere=True, clearance=-1.0):
+                col = plt.cm.hsv(np.random.rand())[:3]
                 self.obstacles.append({
-                    'type': 'box', 'pos': pos, 'size': size,
-                    'vel': np.zeros(3), 'origin': pos.copy(), 'phase': 0.0, 'freq': 0.0
+                    'type': 'sphere', 'pos': pos, 'radius': radius,
+                    'vel': np.zeros(3), 'origin': pos.copy(), 'phase': 0.0, 'freq': 0.0,
+                    'color': col
                 })
 
     def _check_valid(self, pos, radius=None, size=None, is_sphere=True, clearance=1.0):
@@ -790,15 +820,18 @@ class QuadcopterKinematicEnv:
         # Draw obstacles (Better 3D representation)
         for obs in self.obstacles:
             p = obs['pos']
-            alpha = obs.get('alpha', 0.6)
+            alpha = obs.get('alpha', 0.8)
+            color = obs.get('color', 'gray')
             if obs['type'] == 'sphere':
-                self.ax.scatter(p[0], p[1], p[2], color=obs.get('color', 'gray'), s=(obs['radius']*10)**2, alpha=alpha)
+                self.ax.scatter(p[0], p[1], p[2], color=color, s=(obs['radius']*20)**2, alpha=alpha)
             else:
                 s = obs['size']
-                # Use bar3d for real 3D boxes
-                color = obs.get('color', 'gray')
-                self.ax.bar3d(p[0]-s[0]/2, p[1]-s[1]/2, p[2]-s[2]/2, s[0], s[1], s[2], 
-                             color=color, alpha=alpha)
+                if obs.get('is_cylinder', False):
+                    z_bottom = p[2] - s[2]/2
+                    self.ax.bar3d(p[0]-s[0]/2, p[1]-s[1]/2, z_bottom, s[0], s[1], s[2], color=color, alpha=alpha)
+                else:
+                    z_bottom = p[2] - s[2]/2
+                    self.ax.bar3d(p[0]-s[0]/2, p[1]-s[1]/2, z_bottom, s[0], s[1], s[2], color=color, alpha=alpha)
             
         # Draw goals and agents
         colors = ['red', 'green', 'blue', 'orange', 'purple', 'cyan']

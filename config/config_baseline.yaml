@@ -44,8 +44,8 @@ rewards:
 
 environment:
   action_bound: 0.5235987756
-  arena_size: [30, 30, 60]
-  num_obstacles: 0
+  arena_size: [100, 100, 40]
+  num_obstacles: 25
   max_velocity: 5.0
   rangefinder_max_range: 30.0
   collision_distance: 0.8
