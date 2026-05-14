@@ -345,20 +345,8 @@ class EnvironmentApp:
         self.drone_entities = []
         self.goal_entities = []
         
-        self.setup_input()
         self.switch_scene('1')
         
-    def setup_input(self):
-        for key in ['1', '2', '3', '4']:
-            def make_handler(k):
-                return lambda: self.switch_scene(k)
-            input_handler = make_handler(key)
-            setattr(self, f'input_{key}', input_handler)
-            def input_func(k=key):
-                if held_keys[k]:
-                    self.switch_scene(k)
-            self.app.on_update.append(lambda k=key: input_func(k))
-            
     def switch_scene(self, scene_key):
         if self.current_scene == scene_key:
             return
@@ -419,6 +407,11 @@ class EnvironmentApp:
         global update
         def update():
             self.update()
+            
+        global input
+        def input(key):
+            if key in ['1', '2', '3', '4']:
+                self.switch_scene(key)
         
         self.app.run()
 
