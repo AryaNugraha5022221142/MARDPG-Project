@@ -221,6 +221,10 @@ class MARDPG:
             self.critic_optimizers[i].step()
             
         # 2. Update Actor
+        for i in range(self.num_agents):
+            for p in self.critics[i].parameters():
+                p.requires_grad_(False)
+                
         actor_loss = 0
         for i in range(self.num_agents):
             # Only recompute agent i's action from current policy
@@ -255,6 +259,10 @@ class MARDPG:
         actor_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
         self.actor_optimizer.step()
+        
+        for i in range(self.num_agents):
+            for p in self.critics[i].parameters():
+                p.requires_grad_(True)
         
         # 3. Soft Update Targets
         self._soft_update(self.actor, self.actor_target)

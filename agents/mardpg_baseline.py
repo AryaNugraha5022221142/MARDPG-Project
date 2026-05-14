@@ -265,6 +265,10 @@ class MARDPG_Baseline:
             torch.nn.utils.clip_grad_norm_(self.critics[i].parameters(), self.max_grad_norm)
             self.critic_optimizers[i].step()
             
+        for i in range(self.num_agents):
+            for p in self.critics[i].parameters():
+                p.requires_grad_(False)
+
         actor_loss = 0
         for i in range(self.num_agents):
             agent_i_obs = obs[:, :, i, :]
@@ -294,6 +298,10 @@ class MARDPG_Baseline:
         actor_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
         self.actor_optimizer.step()
+        
+        for i in range(self.num_agents):
+            for p in self.critics[i].parameters():
+                p.requires_grad_(True)
         
         self._soft_update(self.actor, self.actor_target)
         for i in range(self.num_agents):
