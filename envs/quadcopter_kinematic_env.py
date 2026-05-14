@@ -68,11 +68,12 @@ class QuadcopterKinematicEnv:
         self.agent_dones = np.zeros(self.num_agents, dtype=bool)
         self.prev_actions = np.zeros((self.num_agents, 2), dtype=np.float32)
         self.prev_ranges_norm = np.zeros((self.num_agents, 25), dtype=np.float32)
+        self.forward_ranges = np.ones(self.num_agents, dtype=np.float32) * self.max_range
         
         # Ablation options
         self.sensor_noise_std = config.get('sensor_noise_std', 0.02) # 2% default
         self.yaw_noise_std = config.get('yaw_noise_std', np.deg2rad(2.0)) # 2 degree default
-        self.reward_type = config.get('reward_type', 'exponential') # 'linear' or 'exponential'
+        self.reward_type = config.get('reward_type', 'baseline') # 'baseline' default
         
         # Reward weights from config
         self.reward_config = config.get('rewards', {
@@ -214,6 +215,7 @@ class QuadcopterKinematicEnv:
         self.prev_vel = np.zeros((self.num_agents, 3), dtype=np.float32)
         self.prev_actions = np.zeros((self.num_agents, 2), dtype=np.float32)
         self.prev_ranges_norm = np.zeros((self.num_agents, 25), dtype=np.float32)
+        self.forward_ranges = np.ones(self.num_agents, dtype=np.float32) * self.max_range
         
         # Random start positions on the "left" side
         for i in range(self.num_agents):
@@ -361,6 +363,9 @@ class QuadcopterKinematicEnv:
                 tn = -pos[dim] / (dir_vecs[:, dim] - 1e-8)
                 ranges = np.where(mask_n & (tn < ranges), tn, ranges)
             
+            # Forward-facing center ray: h=0, v=0 in the 5x5 grid
+            self.forward_ranges[i] = ranges[12]
+            
             # Apply LiDAR measurement noise Eq 3.41: \tilde{\ell}_{i,t}^{(l)} = \ell_{i,t}^{(l)}/r_{\max} + \mathcal{N}(0, \sigma_\ell^2)
             ranges_norm = ranges / self.max_range
             ranges_norm = ranges_norm + np.random.normal(0, self.sensor_noise_std, 25)
@@ -425,7 +430,8 @@ class QuadcopterKinematicEnv:
         # Other agents
         for j in range(self.num_agents):
             if agent_idx == j: continue
-            d = np.linalg.norm(pos - self.agents[j].state[0:3]) - 0.3 # agent radius
+            uav_radius = 0.3
+            d = np.linalg.norm(pos - self.agents[j].state[0:3]) - 2.0 * uav_radius
             if d < min_dist: min_dist = d
             
         return min_dist
@@ -555,27 +561,21 @@ class QuadcopterKinematicEnv:
             r_transfer = 3.0 * (old_dist_to_goal - dist_to_goal)
             
             if self.reward_type == 'baseline':
-                # Baseline Specific Reward
                 alpha = 3.0
                 lam = 5.0
                 sigma = 15.0
-                r_free = 0.1
+                r_free_const = 0.1
                 r_step = -0.6
-                
+
                 d1, d2, d3, d4 = 0.45, 0.3, 0.15, 0.1
-                
-                # Use the old_dist_to_goal we just saved
-                r_dist = alpha * (old_dist_to_goal - dist_to_goal)
-                
-                if d_min < self.collision_dist:
-                    r_col = -sigma
-                else:
-                    r_col = -lam / (d_min + 0.1) if d_min < self.collision_dist + 1.0 else 0.0
-                    
-                r_f = r_free if d_min > 1.5 else 0.0
-                r_s = r_step
-                
-                dense_r = d1 * r_dist + d2 * r_col + d3 * r_f + d4 * r_s
+
+                r_trans = alpha * (old_dist_to_goal - dist_to_goal)
+                r_col = -lam * np.exp(-sigma * max(d_min, 0.0))
+
+                forward_clear = self.forward_ranges[i] >= self.max_range
+                r_free = r_free_const if forward_clear else 0.0
+
+                dense_r = d1 * r_trans + d2 * r_col + d3 * r_free + d4 * r_step
             else:
                 collision_penalty = -5.0 * max(0.0, 1.5 - d_min)**2
                 step_penalty = -0.02
