@@ -1,8 +1,16 @@
-# envs/__init__.py
-from .quadcopter_env import QuadcopterEnv
-from .quadcopter_kinematic_env import QuadcopterKinematicEnv
-from .dynamics import QuadcopterDynamics
-from .kinematic_dynamics import KinematicDynamics
-from .gymnasium_env import MultiUAVGymEnv, register_env
+from .base_env import BaseEnvironment, EnvironmentConfig, Obstacle, ObstacleType
+from .urban_env import DenseUrbanEnvironment
+from .forest_env import CylindricalForestEnvironment
+from .terrain_env import IrregularTerrainEnvironment
+from .structured_env import StructuredPeriodicEnvironment
+from .mixed_env import MixedObstacleEnvironment
+from .dynamic_env import DynamicObstacleEnvironment
+from .benchmark_suite import BenchmarkSuite, create_all_benchmarks
 
-__all__ = ['QuadcopterEnv', 'QuadcopterKinematicEnv', 'QuadcopterDynamics', 'KinematicDynamics', 'MultiUAVGymEnv', 'register_env']
+__all__ = [
+    "BaseEnvironment", "EnvironmentConfig", "Obstacle", "ObstacleType",
+    "DenseUrbanEnvironment", "CylindricalForestEnvironment",
+    "IrregularTerrainEnvironment", "StructuredPeriodicEnvironment",
+    "MixedObstacleEnvironment", "DynamicObstacleEnvironment",
+    "BenchmarkSuite", "create_all_benchmarks",
+]
