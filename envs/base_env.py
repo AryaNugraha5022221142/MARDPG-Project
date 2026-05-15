@@ -453,14 +453,15 @@ class BaseEnvironment(abc.ABC):
             cx = self.rng.uniform(margin * 2, cfg.map_width  - margin * 2)
             cy = self.rng.uniform(margin * 2, cfg.map_depth  - margin * 2)
             for _ in range(n):
-                p = self._free_position_2d(margin) or np.array([cx, cy, 1.5])
+                p = self._free_position_2d(margin)
+                if p is None: p = np.array([cx, cy, 1.5])
                 p[0] = np.clip(cx + self.rng.normal(0, 2.0), margin, cfg.map_width  - margin)
                 p[1] = np.clip(cy + self.rng.normal(0, 2.0), margin, cfg.map_depth  - margin)
                 positions.append(p)
         else:  # "random"
             for _ in range(n):
-                p = self._free_position_2d(margin) or \
-                    np.array([margin, margin, 1.5])
+                p = self._free_position_2d(margin)
+                if p is None: p = np.array([margin, margin, 1.5])
                 positions.append(p)
 
         return positions
@@ -478,11 +479,12 @@ class BaseEnvironment(abc.ABC):
                 cy = cfg.map_depth  / 2.0
                 gx = np.clip(2 * cx - agent[0], margin, cfg.map_width  - margin)
                 gy = np.clip(2 * cy - agent[1], margin, cfg.map_depth  - margin)
-                g  = self._free_position_2d(margin) or np.array([gx, gy, 1.5])
+                g  = self._free_position_2d(margin)
+                if g is None: g = np.array([gx, gy, 1.5])
                 g[0], g[1] = gx, gy
             elif mode == "random":
-                g = self._free_position_2d(margin) or \
-                    np.array([cfg.map_width - margin, cfg.map_depth - margin, 1.5])
+                g = self._free_position_2d(margin)
+                if g is None: g = np.array([cfg.map_width - margin, cfg.map_depth - margin, 1.5])
             else:  # "fixed"
                 g = np.array([cfg.map_width - margin, cfg.map_depth - margin, 1.5])
             goals.append(g)
