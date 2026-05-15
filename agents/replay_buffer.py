@@ -59,7 +59,10 @@ class SequenceReplayBuffer:
         if not valid_episodes:
             return None
             
-        sampled_episodes = random.choices(valid_episodes, k=batch_size)
+        if len(valid_episodes) >= batch_size:
+            sampled_episodes = random.sample(valid_episodes, batch_size)
+        else:
+            sampled_episodes = random.choices(valid_episodes, k=batch_size)
         
         obs_batch, actions_batch, rewards_batch = [], [], []
         next_obs_batch, dones_batch, mask_batch = [], [], []

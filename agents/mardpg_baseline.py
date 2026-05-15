@@ -74,6 +74,7 @@ class MultiActorLSTMBaseline(nn.Module):
     """
     def __init__(self, obs_dim_total: int, num_agents: int = 3, hidden_dim: int = 128, device: str = 'cpu', action_bound: float = 2.5):
         super().__init__()
+        assert action_bound < 1.0, "Action bound must be < 1.0 for kinematic control to prevent instability."
         self.num_agents = num_agents
         state_dim = obs_dim_total - 25
         self.shared_base = MARDPGBaseNetwork(state_dim)
