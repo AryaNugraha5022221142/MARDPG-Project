@@ -1,5 +1,6 @@
 # envs/quadcopter_env.py
 import numpy as np
+import math
 from typing import Tuple, Dict, Any, List
 from .dynamics import QuadcopterDynamics
 
@@ -586,7 +587,9 @@ class QuadcopterEnv:
                 
                 dense_r = d1 * r_dist + d2 * r_col + d3 * r_f + d4 * r_s
             else:
-                collision_penalty = -5.0 * max(0.0, 1.5 - d_min)**2
+                lam_col = self.reward_config.get('collision_lambda', 5.0)
+                sig_col = self.reward_config.get('collision_sigma', 15.0)
+                collision_penalty = -lam_col * math.exp(-sig_col * d_min)
                 step_penalty = -0.02
                 tracking_weight = self.reward_config.get('weights', {}).get('tracking', 0.3)
                 tracking_penalty = -tracking_weight * float(tracking_errors[i]) ** 2
