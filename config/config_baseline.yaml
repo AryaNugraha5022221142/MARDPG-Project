@@ -1,6 +1,6 @@
 training:
   num_episodes: 10000
-  num_agents: 3
+  num_agents: 5
   seed: 42
   device: "cuda"
 

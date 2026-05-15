@@ -213,8 +213,7 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
         info['agent_success'] = np.zeros(self.num_agents, dtype=bool)
         info['agent_collision'] = np.zeros(self.num_agents, dtype=bool)
         
-        rewards = np.zeros(self.num_agents, dtype=np.float32)
-        
+        # Step 1: Apply actions and physics
         for i in range(self.num_agents):
             if self.agent_dones[i]: continue
             
@@ -225,6 +224,14 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
             self.agents[i].state[0] = np.clip(self.agents[i].state[0], 0.0, self.arena_size[0])
             self.agents[i].state[1] = np.clip(self.agents[i].state[1], 0.0, self.arena_size[1])
             self.agents[i].state[2] = np.clip(self.agents[i].state[2], 0.0, self.arena_size[2])
+            
+        # Step 2: Get observations from the new state
+        obs = self._get_observations()
+        rewards = np.zeros(self.num_agents, dtype=np.float32)
+        
+        # Step 3: Compute rewards
+        for i in range(self.num_agents):
+            if self.agent_dones[i]: continue
             
             pos = self.agents[i].state[0:3]
             goal = self.goals[i]
@@ -240,7 +247,13 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
             # Adding distance to goal reward for progress
             r_dist = 5.0 * (old_dist_to_goal - dist_to_goal)
             
-            rewards[i] = r_dist + r_col - 0.05
+            # Paper r_free
+            front_rays = [6, 7, 8, 11, 12, 13, 16, 17, 18]
+            idx_ranges = obs[i, :25]
+            is_front_clear = np.min(idx_ranges[front_rays]) >= 0.95
+            r_free = 0.1 if is_front_clear else 0.0
+            
+            rewards[i] = r_dist + r_col + r_free - 0.05
             
             if dist_to_goal < self.goal_dist:
                 self.agent_dones[i] = True
@@ -253,8 +266,6 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
                 info['collision'] = True
                 rewards[i] += self.reward_config.get('collision_penalty', -50.0)
                 
-        obs = self._get_observations()
-        
         info['agent_dones'] = self.agent_dones.copy()
         
         individual_successes = sum(1 for i in range(self.num_agents) 

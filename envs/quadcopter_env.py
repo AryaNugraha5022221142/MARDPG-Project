@@ -582,7 +582,11 @@ class QuadcopterEnv:
                 else:
                     r_col = -lam / (d_min + 0.1) if d_min < self.collision_dist + 1.0 else 0.0
                     
-                r_f = r_free if d_min > 1.5 else 0.0
+                # Paper r_free
+                front_rays = [6, 7, 8, 11, 12, 13, 16, 17, 18]
+                idx_ranges = obs[i, :25]
+                is_front_clear = np.min(idx_ranges[front_rays]) >= 0.95
+                r_f = r_free if is_front_clear else 0.0
                 r_s = r_step
                 
                 dense_r = d1 * r_dist + d2 * r_col + d3 * r_f + d4 * r_s
