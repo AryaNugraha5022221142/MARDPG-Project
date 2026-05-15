@@ -14,8 +14,8 @@ network:
     lstm_layers: 1
 
 learning:
-  actor_lr: 0.01
-  critic_lr: 0.01
+  actor_lr: 1.0e-4
+  critic_lr: 3.0e-4
   gamma: 0.99
   max_grad_norm: 1.0
 

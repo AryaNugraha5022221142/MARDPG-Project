@@ -193,13 +193,16 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
             ranges_norm = ranges / self.max_range
             ranges_norm = np.clip(ranges_norm, 0.0, 1.0)
             
-            rel_pos = (goal - pos) / self.arena_diagonal
+            goal_dist = np.linalg.norm(goal - pos) / self.arena_diagonal
+            dx, dy, dz = goal - pos
+            goal_h_angle = np.arctan2(dy, dx) - yaw        # relative to heading
+            goal_v_angle = np.arctan2(dz, np.sqrt(dx**2+dy**2)) - pitch
             
             # [25 rangefinders, [ϑ, ϕ], target ξ]
             obs = np.concatenate([
                 ranges_norm,
                 [pitch, yaw],
-                rel_pos
+                [goal_dist, goal_h_angle, goal_v_angle]
             ])
             obs_all.append(obs)
             
@@ -241,19 +244,19 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
             old_dist_to_goal = self.prev_dist_to_goal[i]
             self.prev_dist_to_goal[i] = dist_to_goal
             
-            # Paper collision reward: r_col = -lambda_ * math.exp(-sigma * d_min)
-            r_col = -self.lambda_ * math.exp(-self.sigma_ * d_min)
-            
-            # Adding distance to goal reward for progress
-            r_dist = 5.0 * (old_dist_to_goal - dist_to_goal)
-            
-            # Paper r_free
             front_rays = [6, 7, 8, 11, 12, 13, 16, 17, 18]
             idx_ranges = obs[i, :25]
-            is_front_clear = np.min(idx_ranges[front_rays]) >= 0.95
-            r_free = 0.1 if is_front_clear else 0.0
+            all_clear = np.min(idx_ranges[front_rays]) >= 0.95
+
+            alpha, lam, sigma = 3.0, 5.0, 15.0
+            delta = [0.45, 0.30, 0.15, 0.10]
             
-            rewards[i] = r_dist + r_col + r_free - 0.05
+            r_trans = alpha * (old_dist_to_goal - dist_to_goal)
+            r_col   = -lam * math.exp(-sigma * d_min)
+            r_free  = 0.1 if all_clear else 0.0
+            r_step  = -0.6
+            
+            rewards[i] = delta[0]*r_trans + delta[1]*r_col + delta[2]*r_free + delta[3]*r_step
             
             if dist_to_goal < self.goal_dist:
                 self.agent_dones[i] = True

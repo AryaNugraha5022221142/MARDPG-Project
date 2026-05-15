@@ -94,10 +94,10 @@ class MARDPG:
         # Noise (Gaussian for continuous)
         # Set total steps to a reasonable estimate: e.g. 600 max steps/ep * 5000 episodes = 3,000,000 steps.
         # This allows exploration to organically decay properly over the full 5000 episodes.
-        self.noise = [AdaptiveGaussianNoise(action_dim,
+        self.noise = AdaptiveGaussianNoise(action_dim,
                                             sigma_start=0.5,
                                             sigma_end=0.10,
-                                            total_steps=10_000_000) for _ in range(num_agents)]
+                                            total_steps=10_000_000)
         
         # Optimizers
         actor_lr = config['learning'].get('actor_lr', 1e-4)
@@ -142,8 +142,7 @@ class MARDPG:
                 
                 # Add Gaussian Noise
                 if explore:
-                    action += self.noise[i].sample()
-                    self.noise[i].step() # anneal after each call
+                    action += self.noise.sample()
                 
                 action = np.clip(action, -self.action_bound, self.action_bound)
                 actions.append(action)
@@ -152,6 +151,9 @@ class MARDPG:
                 if i == 0:
                     actor_hiddens = []
                 actor_hiddens.append(h_seq)
+            
+            if explore:
+                self.noise.step()
             
             actions_np = np.array(actions)
             actions_tensor = torch.FloatTensor(actions_np).unsqueeze(0).unsqueeze(0).to(self.device) # (1, 1, num_agents, action_dim)

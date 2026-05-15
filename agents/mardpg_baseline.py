@@ -190,7 +190,7 @@ class MARDPG_Baseline:
         sigma_start = config.get('exploration', {}).get('sigma_start', 0.3)
         sigma_end = config.get('exploration', {}).get('sigma_end', 0.05)
         total_steps = config.get('exploration', {}).get('total_steps', 5000000)
-        self.noise = [AnnealedGaussianNoise(action_dim, sigma_start, sigma_end, total_steps) for _ in range(num_agents)]
+        self.noise = AnnealedGaussianNoise(action_dim, sigma_start, sigma_end, total_steps)
 
     def select_actions(self, obs: np.ndarray, 
                        actor_hidden: List[Tuple[torch.Tensor, torch.Tensor]], 
@@ -214,11 +214,13 @@ class MARDPG_Baseline:
                 action_np = action.cpu().numpy().flatten()
                 
                 if explore:
-                    action_np += self.noise[i].sample()
-                    self.noise[i].step()
+                    action_np += self.noise.sample()
                     
                 action_np = np.clip(action_np, -self.action_bound, self.action_bound)
                 actions.append(action_np.astype(np.float32))
+            
+            if explore:
+                self.noise.step()
             
             actions_np = np.array(actions)
             actions_tensor = torch.FloatTensor(actions_np).unsqueeze(0).unsqueeze(0).to(self.device)
