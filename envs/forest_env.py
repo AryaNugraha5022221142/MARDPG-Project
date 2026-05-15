@@ -92,7 +92,8 @@ class CylindricalForestEnvironment(BaseEnvironment):
             attempts += 1
             # Pick a cluster centre and sample near it
             cc = cluster_centres[rng.integers(0, len(cluster_centres))]
-            spread = rng.uniform(2.0, min(W, D) * 0.15)
+            max_spread = max(2.1, min(W, D) * 0.15)
+            spread = rng.uniform(2.0, max_spread)
             x = float(np.clip(rng.normal(cc[0], spread), self._r_max + 0.5, W - self._r_max - 0.5))
             y = float(np.clip(rng.normal(cc[1], spread), self._r_max + 0.5, D - self._r_max - 0.5))
 

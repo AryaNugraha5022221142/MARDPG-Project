@@ -695,17 +695,37 @@ class QuadcopterEnv:
         self.ax.set_title(status_text)
         
         # Draw obstacles (Better 3D representation)
+        bar_x, bar_y, bar_z = [], [], []
+        bar_dx, bar_dy, bar_dz = [], [], []
+        bar_colors = []
+        
+        sph_x, sph_y, sph_z = [], [], []
+        sph_s, sph_colors = [], []
+        
         for obs in self.obstacles:
             p = obs['pos']
             alpha = obs.get('alpha', 0.6)
             if obs['type'] == 'sphere':
-                self.ax.scatter(p[0], p[1], p[2], color=obs.get('color', 'gray'), s=(obs['radius']*10)**2, alpha=alpha)
+                sph_x.append(p[0])
+                sph_y.append(p[1])
+                sph_z.append(p[2])
+                sph_s.append((obs['radius']*10)**2)
+                sph_colors.append(obs.get('color', 'gray'))
             else:
                 s = obs['size']
-                # Use bar3d for real 3D boxes
-                color = obs.get('color', 'gray')
-                self.ax.bar3d(p[0]-s[0]/2, p[1]-s[1]/2, p[2]-s[2]/2, s[0], s[1], s[2], 
-                             color=color, alpha=alpha)
+                bar_x.append(p[0]-s[0]/2)
+                bar_y.append(p[1]-s[1]/2)
+                bar_z.append(p[2]-s[2]/2)
+                bar_dx.append(s[0])
+                bar_dy.append(s[1])
+                bar_dz.append(s[2])
+                bar_colors.append(obs.get('color', 'gray'))
+                
+        if bar_x:
+            self.ax.bar3d(bar_x, bar_y, bar_z, bar_dx, bar_dy, bar_dz, color=bar_colors, alpha=0.6)
+            
+        if sph_x:
+            self.ax.scatter(sph_x, sph_y, sph_z, color=sph_colors, s=sph_s, alpha=0.6)
             
         # Draw goals and agents
         colors = ['red', 'green', 'blue', 'orange', 'purple', 'cyan']

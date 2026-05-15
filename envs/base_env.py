@@ -436,7 +436,21 @@ class BaseEnvironment(abc.ABC):
                 np.array([cfg.map_width - margin, cfg.map_depth - margin, 1.5]),
             ]
             for i in range(n):
-                positions.append(corners[i % len(corners)].copy())
+                c = corners[i % len(corners)]
+                if self.is_collision(c):
+                    # Try to find a free space nearby
+                    found = False
+                    for radius in np.arange(1.0, 5.0, 0.5):
+                        for angle in np.linspace(0, 2 * np.pi, 8):
+                            test_c = c + np.array([radius * np.cos(angle), radius * np.sin(angle), 0])
+                            test_c[0] = np.clip(test_c[0], margin, cfg.map_width - margin)
+                            test_c[1] = np.clip(test_c[1], margin, cfg.map_depth - margin)
+                            if not self.is_collision(test_c):
+                                c = test_c
+                                found = True
+                                break
+                        if found: break
+                positions.append(c.copy())
         elif mode == "border":
             for i in range(n):
                 side = i % 4
@@ -479,9 +493,22 @@ class BaseEnvironment(abc.ABC):
                 cy = cfg.map_depth  / 2.0
                 gx = np.clip(2 * cx - agent[0], margin, cfg.map_width  - margin)
                 gy = np.clip(2 * cy - agent[1], margin, cfg.map_depth  - margin)
-                g  = self._free_position_2d(margin)
-                if g is None: g = np.array([gx, gy, 1.5])
-                g[0], g[1] = gx, gy
+                g = np.array([gx, gy, 1.5])
+                if self.is_collision(g):
+                    found = False
+                    for radius in np.arange(1.0, 8.0, 0.5):
+                        for angle in np.linspace(0, 2 * np.pi, 8):
+                            test_g = g + np.array([radius * np.cos(angle), radius * np.sin(angle), 0])
+                            test_g[0] = np.clip(test_g[0], margin, cfg.map_width - margin)
+                            test_g[1] = np.clip(test_g[1], margin, cfg.map_depth - margin)
+                            if not self.is_collision(test_g):
+                                g = test_g
+                                found = True
+                                break
+                        if found: break
+                if self.is_collision(g):
+                    fallback = self._free_position_2d(margin)
+                    if fallback is not None: g = fallback
             elif mode == "random":
                 g = self._free_position_2d(margin)
                 if g is None: g = np.array([cfg.map_width - margin, cfg.map_depth - margin, 1.5])
