@@ -169,10 +169,10 @@ class DenseUrbanEnvironment(BaseEnvironment):
         # ── 2. Extra perturb buildings ────────────────────────────────────────
         extra_heights = sample_height(rng, cfg, self._perturb_extra)
         for i in range(self._perturb_extra):
-            cx = rng.uniform(2.0, W - 2.0)
-            cy = rng.uniform(2.0, D - 2.0)
-            fw = rng.uniform(1.0, b_w)
-            fd = rng.uniform(1.0, b_d)
+            cx = rng.uniform(min(2.0, W/2), max(2.0, W - 2.0))
+            cy = rng.uniform(min(2.0, W/2), max(2.0, D - 2.0))
+            fw = rng.uniform(min(1.0, b_w), max(1.0, b_w))
+            fd = rng.uniform(min(1.0, b_d), max(1.0, b_d))
             r  = max(fw, fd) / 2.0 + cfg.min_clearance * 0.5
             if pgrid.is_free(cx, cy, r * 0.7):
                 pgrid.mark(cx, cy, r * 0.7)

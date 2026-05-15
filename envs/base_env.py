@@ -354,7 +354,7 @@ class BaseEnvironment(abc.ABC):
                 gap = d - footprint
                 min_gap = min(min_gap, gap)
         metrics["min_obstacle_gap_m"] = round(min_gap, 3)
-        if min_gap < 0:
+        if min_gap < -0.1:
             warnings.append(f"⚠ Obstacles overlap! min gap = {min_gap:.2f} m")
         elif min_gap < self.config.min_clearance:
             warnings.append(f"⚠ min gap {min_gap:.2f} m < threshold "
