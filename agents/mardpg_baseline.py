@@ -28,10 +28,10 @@ class AnnealedGaussianNoise:
 class MARDPGBaseNetwork(nn.Module):
     def __init__(self, state_dim: int):
         super().__init__()
-        self.conv = nn.Conv2d(in_channels=1, out_channels=16, kernel_size=2, stride=1)
-        self.fc_state1 = nn.Linear(state_dim, 32)
-        self.fc_state2 = nn.Linear(32, 8)
-        self.fusion_dim = 16 * 16 + 8  # 4x4 output spatial size * 16 channels
+        self.conv = nn.Conv2d(in_channels=1, out_channels=32, kernel_size=2, stride=1)
+        self.fc_angles = nn.Linear(2, 8)
+        self.fc_goal = nn.Linear(3, 8)
+        self.fusion_dim = 32 * 4 * 4 + 8 + 8  # 4x4 output spatial size * 32 channels + 8 (angles) + 8 (goal)
 
     def forward(self, ranges: torch.Tensor, state_vec: torch.Tensor):
         b, s, _ = ranges.shape
@@ -40,10 +40,13 @@ class MARDPGBaseNetwork(nn.Module):
         c_out = c_out.view(b * s, -1)
 
         state_vec_flat = state_vec.contiguous().view(b * s, -1)
-        st_out = F.relu(self.fc_state1(state_vec_flat))
-        st_out = F.relu(self.fc_state2(st_out))
+        angles = state_vec_flat[:, :2]
+        goal = state_vec_flat[:, 2:5]
 
-        fused = torch.cat([c_out, st_out], dim=1).view(b, s, -1)
+        angles_out = F.relu(self.fc_angles(angles))
+        goal_out = F.relu(self.fc_goal(goal))
+
+        fused = torch.cat([c_out, angles_out, goal_out], dim=1).view(b, s, -1)
         return fused
 
 class ActorLSTMAgentHead(nn.Module):
@@ -224,13 +227,9 @@ class MARDPG_Baseline:
                 self.noise.step()
             
             actions_np = np.array(actions)
-            actions_tensor = torch.FloatTensor(actions_np).unsqueeze(0).unsqueeze(0).to(self.device)
-            obs_tensor = torch.FloatTensor(obs).unsqueeze(0).unsqueeze(0).to(self.device)
-            
             for i in range(self.num_agents):
                 h, c = critic_hidden[i]
-                _, (new_h, new_c) = self.critics[i](obs_tensor, actions_tensor, (h, c), agent_idx=i)
-                new_critic_hidden.append((new_h, new_c))
+                new_critic_hidden.append((h, c))
                 
         self.actor.train()
         for c in self.critics: c.train()

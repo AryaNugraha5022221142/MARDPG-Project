@@ -125,13 +125,10 @@ class MARDPG_Gaussian:
                 actor_hiddens.append(h_seq)
             
             actions_np = np.array(actions)
-            actions_tensor = torch.FloatTensor(actions_np).unsqueeze(0).unsqueeze(0).to(self.device)
-            obs_tensor = torch.FloatTensor(obs).unsqueeze(0).unsqueeze(0).to(self.device)
             
             for i in range(self.num_agents):
                 h, c = critic_hidden[i]
-                _, (new_h, new_c) = self.critics[i](obs_tensor, actions_tensor, (h, c), agent_idx=i)
-                new_critic_hidden.append((new_h, new_c))
+                new_critic_hidden.append((h, c))
                 
         self.actor.train()
         for c in self.critics: c.train()

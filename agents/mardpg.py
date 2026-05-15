@@ -156,14 +156,11 @@ class MARDPG:
                 self.noise.step()
             
             actions_np = np.array(actions)
-            actions_tensor = torch.FloatTensor(actions_np).unsqueeze(0).unsqueeze(0).to(self.device) # (1, 1, num_agents, action_dim)
-            obs_tensor = torch.FloatTensor(obs).unsqueeze(0).unsqueeze(0).to(self.device) # (1, 1, num_agents, obs_dim)
             
             # 2. Update Critic hidden states (even if we don't use the Q-values)
             for i in range(self.num_agents):
                 h, c = critic_hidden[i]
-                _, (new_h, new_c) = self.critics[i](obs_tensor, actions_tensor, (h, c), agent_idx=i)
-                new_critic_hidden.append((new_h, new_c))
+                new_critic_hidden.append((h, c))
                 
         self.actor.train()
         for c in self.critics: c.train()
