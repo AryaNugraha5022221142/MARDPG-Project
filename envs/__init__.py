@@ -3,7 +3,6 @@ from .urban_env import DenseUrbanEnvironment
 from .forest_env import CylindricalForestEnvironment
 from .terrain_env import IrregularTerrainEnvironment
 from .structured_env import StructuredPeriodicEnvironment
-from .mixed_env import MixedObstacleEnvironment
 from .dynamic_env import DynamicObstacleEnvironment
 from .benchmark_suite import BenchmarkSuite, create_all_benchmarks
 
@@ -11,6 +10,6 @@ __all__ = [
     "BaseEnvironment", "EnvironmentConfig", "Obstacle", "ObstacleType",
     "DenseUrbanEnvironment", "CylindricalForestEnvironment",
     "IrregularTerrainEnvironment", "StructuredPeriodicEnvironment",
-    "MixedObstacleEnvironment", "DynamicObstacleEnvironment",
+    "StructuredObstacleEnvironment", "DynamicObstacleEnvironment",
     "BenchmarkSuite", "create_all_benchmarks",
 ]

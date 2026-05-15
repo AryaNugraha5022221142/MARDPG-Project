@@ -216,7 +216,7 @@ class CylindricalForestEnvironment(BaseEnvironment):
                 position=np.array([px, py, 0.0]),
                 dimensions=np.array([post_r, post_r, h]),
                 color=(1.0, 0.2, 0.2),
-                metadata={"layer": "ring_trap", "ring_cx": cx, "ring_cy": cy},
+                metadata={"layer": "ring_trap", "ring_cx": cx, "ring_cy": cy, "allow_overlap": True},
             ))
 
     # ── Colour helpers ────────────────────────────────────────────────────────

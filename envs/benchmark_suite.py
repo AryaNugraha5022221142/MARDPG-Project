@@ -9,7 +9,6 @@ from .urban_env import DenseUrbanEnvironment
 from .forest_env import CylindricalForestEnvironment
 from .terrain_env import IrregularTerrainEnvironment
 from .structured_env import StructuredPeriodicEnvironment
-from .mixed_env import MixedObstacleEnvironment
 from .dynamic_env import DynamicObstacleEnvironment
 
 class BenchmarkSuite:
@@ -20,7 +19,6 @@ class BenchmarkSuite:
         "forest": CylindricalForestEnvironment,
         "terrain": IrregularTerrainEnvironment,
         "structured": StructuredPeriodicEnvironment,
-        "mixed": MixedObstacleEnvironment,
         "dynamic": DynamicObstacleEnvironment,
     }
     

@@ -89,19 +89,30 @@ class MatplotlibVisualizer:
         r, _, h = dim
         z_base = pos[2]
         z = np.linspace(z_base, z_base + h, 2)
-        theta = np.linspace(0, 2*np.pi, 20)
+        theta = np.linspace(0, 2*np.pi, 40)
         theta_grid, z_grid = np.meshgrid(theta, z)
         x_grid = r * np.cos(theta_grid) + pos[0]
         y_grid = r * np.sin(theta_grid) + pos[1]
-        self.ax.plot_surface(x_grid, y_grid, z_grid, color=color, alpha=0.6)
+        self.ax.plot_surface(x_grid, y_grid, z_grid, color=color, alpha=0.8, antialiased=True, shade=True)
         
+        # Add top and bottom caps
+        rc = np.linspace(0, r, 2)
+        tc = np.linspace(0, 2*np.pi, 40)
+        R, T = np.meshgrid(rc, tc)
+        xc = R * np.cos(T) + pos[0]
+        yc = R * np.sin(T) + pos[1]
+        # Bottom cap
+        self.ax.plot_surface(xc, yc, np.full_like(xc, z_base), color=color, alpha=0.8, antialiased=True, shade=True)
+        # Top cap
+        self.ax.plot_surface(xc, yc, np.full_like(xc, z_base + h), color=color, alpha=0.8, antialiased=True, shade=True)
+
     def _plot_sphere(self, pos, dim, color):
         rx, ry, rz = dim[0]/2, dim[1]/2, dim[2]/2
-        u, v = np.mgrid[0:2*np.pi:15j, 0:np.pi:10j]
+        u, v = np.mgrid[0:2*np.pi:30j, 0:np.pi:20j]
         x = rx * np.cos(u) * np.sin(v) + pos[0]
         y = ry * np.sin(u) * np.sin(v) + pos[1]
         z = rz * np.cos(v) + (pos[2] + rz)
-        self.ax.plot_surface(x, y, z, color=color, alpha=0.6)
+        self.ax.plot_surface(x, y, z, color=color, alpha=0.8, antialiased=True, shade=True)
         
     def render(self):
         agents = np.array(self.env.agents)
@@ -118,7 +129,7 @@ class MatplotlibVisualizer:
 
 def main():
     parser = argparse.ArgumentParser(description="View the 3D environments with random agent actions.")
-    parser.add_argument('--scene', type=str, default='urban', choices=['urban', 'forest', 'terrain', 'structured', 'mixed', 'dynamic'], help="Type of scene to load.")
+    parser.add_argument('--scene', type=str, default='urban', choices=['urban', 'forest', 'terrain', 'structured', 'dynamic'], help="Type of scene to load.")
     parser.add_argument('--difficulty', type=str, default='EASY', choices=['TRIVIAL', 'EASY', 'MEDIUM', 'HARD', 'EXTREME'], help="Difficulty level.")
     parser.add_argument('--steps', type=int, default=1000, help="Number of simulation steps to run.")
     parser.add_argument('--dt', type=float, default=0.05, help="Time step delta for the visualizer.")

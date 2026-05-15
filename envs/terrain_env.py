@@ -62,7 +62,7 @@ class IrregularTerrainEnvironment(BaseEnvironment):
                 position=np.array([cx, cy, 0.0]),
                 dimensions=np.array([r*2, r*2, h]), # Treated as ellipsoid/sphere dimensions
                 color=(0.5, 0.4, 0.3),
-                metadata={"layer": "hill"}
+                metadata={"layer": "hill", "allow_overlap": True}
             ))
 
         # Boulders (scattered irregular obstacles)

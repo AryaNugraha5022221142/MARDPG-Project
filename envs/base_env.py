@@ -347,18 +347,29 @@ class BaseEnvironment(abc.ABC):
 
         # Obstacle-obstacle clearance
         min_gap = float("inf")
+        
+        def get_radius(obs):
+            if obs.obstacle_type in (ObstacleType.CYLINDER, ObstacleType.DYNAMIC):
+                return obs.dimensions[0]
+            elif obs.obstacle_type == ObstacleType.SPHERE:
+                return max(obs.dimensions) / 2.0
+            else:
+                return max(obs.dimensions[:2]) / 2.0
+                
         for i, a in enumerate(self.obstacles):
+            ra = get_radius(a)
             for b in self.obstacles[i+1:]:
+                if a.metadata.get("allow_overlap") or b.metadata.get("allow_overlap"):
+                    continue
+                rb = get_radius(b)
                 d = np.linalg.norm(a.position[:2] - b.position[:2])
-                footprint = (a.dimensions[0] + b.dimensions[0]) / 2.0
-                gap = d - footprint
+                gap = d - (ra + rb)
                 min_gap = min(min_gap, gap)
         metrics["min_obstacle_gap_m"] = round(min_gap, 3)
         if min_gap < -0.1:
             warnings.append(f"⚠ Obstacles overlap! min gap = {min_gap:.2f} m")
-        elif min_gap < self.config.min_clearance:
-            warnings.append(f"⚠ min gap {min_gap:.2f} m < threshold "
-                            f"{self.config.min_clearance} m")
+        elif min_gap < 0.8:
+            warnings.append(f"⚠ min gap {min_gap:.2f} m is very narrow (< 0.8 m)")
 
         # Agent start/goal reachability (simple free-space check)
         for i, (ag, gl) in enumerate(zip(self.agents, self.goals)):

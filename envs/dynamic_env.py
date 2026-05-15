@@ -38,10 +38,15 @@ class DynamicObstacleEnvironment(BaseEnvironment):
                 ))
                 
         # Add dynamic obstacles
-        for _ in range(n_dynamic):
+        for _ in range(n_dynamic * 3): # try up to 3x times
+            if len([o for o in self.obstacles if o.is_dynamic]) >= n_dynamic: break
             cx = self.rng.uniform(2.0, W - 2.0)
             cy = self.rng.uniform(2.0, D - 2.0)
             r = self.rng.uniform(0.5, 1.5)
+            
+            if not pgrid.is_free(cx, cy, r + cfg.min_clearance):
+                continue
+            pgrid.mark(cx, cy, r)
             
             vx = self.rng.uniform(-2.0, 2.0)
             vy = self.rng.uniform(-2.0, 2.0)

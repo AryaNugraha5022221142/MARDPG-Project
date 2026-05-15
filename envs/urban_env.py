@@ -262,8 +262,9 @@ class DenseUrbanEnvironment(BaseEnvironment):
                 # Two wall arms flanking the gap
                 for sign in [-1, 1]:
                     arm_y = gate_y + sign * (gap / 2.0 + arm_l / 2.0)
-                    if pgrid.is_free(gate_x, arm_y, 0.8):
-                        pgrid.mark(gate_x, arm_y, 0.8)
+                    r_arm = max(1.0, arm_l) / 2.0 + cfg.min_clearance * 0.5
+                    if pgrid.is_free(gate_x, arm_y, r_arm):
+                        pgrid.mark(gate_x, arm_y, r_arm)
                         self.obstacles.append(Obstacle(
                             obstacle_type=ObstacleType.CUBOID,
                             position=np.array([gate_x, arm_y, 0.0]),
@@ -279,8 +280,9 @@ class DenseUrbanEnvironment(BaseEnvironment):
                 h      = cfg.max_height
                 for sign in [-1, 1]:
                     arm_x = gate_x + sign * (gap / 2.0 + arm_l / 2.0)
-                    if pgrid.is_free(arm_x, gate_y, 0.8):
-                        pgrid.mark(arm_x, gate_y, 0.8)
+                    r_arm = max(1.0, arm_l) / 2.0 + cfg.min_clearance * 0.5
+                    if pgrid.is_free(arm_x, gate_y, r_arm):
+                        pgrid.mark(arm_x, gate_y, r_arm)
                         self.obstacles.append(Obstacle(
                             obstacle_type=ObstacleType.CUBOID,
                             position=np.array([arm_x, gate_y, 0.0]),
