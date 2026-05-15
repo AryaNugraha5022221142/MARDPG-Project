@@ -244,9 +244,8 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
             old_dist_to_goal = self.prev_dist_to_goal[i]
             self.prev_dist_to_goal[i] = dist_to_goal
             
-            front_rays = [6, 7, 8, 11, 12, 13, 16, 17, 18]
             idx_ranges = obs[i, :25]
-            all_clear = np.min(idx_ranges[front_rays]) >= 0.95
+            all_clear = np.min(idx_ranges) >= 0.95
 
             alpha, lam, sigma = 3.0, 5.0, 15.0
             delta = [0.45, 0.30, 0.15, 0.10]
