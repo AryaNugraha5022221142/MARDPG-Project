@@ -198,10 +198,10 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
             goal_h_angle = np.arctan2(dy, dx) - yaw        # relative to heading
             goal_v_angle = np.arctan2(dz, np.sqrt(dx**2+dy**2)) - pitch
             
-            # [25 rangefinders, [ϑ, ϕ], target ξ]
+            # [ [ϕ, ϑ], 25 rangefinders, target ξ ]
             obs = np.concatenate([
-                ranges_norm,
                 [pitch, yaw],
+                ranges_norm,
                 [goal_dist, goal_h_angle, goal_v_angle]
             ])
             obs_all.append(obs)
@@ -244,7 +244,7 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
             old_dist_to_goal = self.prev_dist_to_goal[i]
             self.prev_dist_to_goal[i] = dist_to_goal
             
-            idx_ranges = obs[i, :25]
+            idx_ranges = obs[i, 2:27]
             all_clear = np.min(idx_ranges) >= 0.95
 
             alpha, lam, sigma = 3.0, 5.0, 15.0
@@ -260,13 +260,13 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
             if dist_to_goal < self.goal_dist:
                 self.agent_dones[i] = True
                 info['agent_terminated_now'][i] = True
-                rewards[i] += self.reward_config.get('goal_bonus', 50.0)
+                rewards[i] += self.reward_config.get('goal_bonus', 0.0)
             elif not self.agent_dones[i] and d_min < self.collision_dist:
                 self.agent_dones[i] = True
                 self._episode_collision = True
                 info['agent_terminated_now'][i] = True
                 info['collision'] = True
-                rewards[i] += self.reward_config.get('collision_penalty', -50.0)
+                rewards[i] += self.reward_config.get('collision_penalty', 0.0)
                 
         info['agent_dones'] = self.agent_dones.copy()
         

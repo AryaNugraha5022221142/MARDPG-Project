@@ -75,7 +75,7 @@ class MultiActorLSTMBaseline(nn.Module):
     """
     Implements a shared base network with per-agent LSTM and output heads.
     """
-    def __init__(self, obs_dim_total: int, num_agents: int = 3, hidden_dim: int = 128, device: str = 'cpu', action_bound: float = 2.5):
+    def __init__(self, obs_dim_total: int, num_agents: int = 3, hidden_dim: int = 128, device: str = 'cpu', action_bound: float = 0.5235987756):
         super().__init__()
         assert action_bound < 1.0, "Action bound must be < 1.0 for kinematic control to prevent instability."
         self.num_agents = num_agents
@@ -91,8 +91,10 @@ class MultiActorLSTMBaseline(nn.Module):
         if is_single_step:
             x = x.unsqueeze(1) # (batch, 1, input_dim)
 
-        ranges = x[:, :, :25]
-        state_vec = x[:, :, 25:]
+        angles = x[:, :, :2]
+        ranges = x[:, :, 2:27]
+        goal = x[:, :, 27:]
+        state_vec = torch.cat([angles, goal], dim=-1)
         fused = self.shared_base(ranges, state_vec)
 
         if hidden is None:
@@ -255,6 +257,10 @@ class MARDPG_Baseline:
         burn_in = self.seq_len // 4
         masks[:, :burn_in] = 0.0
         
+        agent_masks = masks.unsqueeze(-1).repeat(1, 1, self.num_agents)
+        prev_dones = torch.cat([torch.zeros_like(dones[:, 0:1, :]), dones[:, :-1, :]], dim=1)
+        agent_masks = agent_masks * (1.0 - prev_dones)
+        
         actor_hidden_target  = [self.actor.init_hidden(self.batch_size, self.device) for _ in range(self.num_agents)]
         actor_hidden_critic  = [self.actor.init_hidden(self.batch_size, self.device) for _ in range(self.num_agents)]
         actor_hidden_actor   = [self.actor.init_hidden(self.batch_size, self.device) for _ in range(self.num_agents)]
@@ -282,11 +288,12 @@ class MARDPG_Baseline:
             current_q_seq, _ = self.critics[i](obs, actions, critic_hidden_update[i], agent_idx=i)
             current_q = current_q_seq.squeeze(-1)
             
+            agent_mask = agent_masks[:, :, i]
             loss = F.mse_loss(current_q, target_q, reduction='none')
-            critic_loss = (loss * masks).sum() / (masks.sum() + 1e-8)
+            critic_loss = (loss * agent_mask).sum() / (agent_mask.sum() + 1e-8)
             critic_losses.append(critic_loss.item())
             
-            q_mag = (current_q.abs() * masks).sum() / (masks.sum() + 1e-8)
+            q_mag = (current_q.abs() * agent_mask).sum() / (agent_mask.sum() + 1e-8)
             q_value_mags.append(q_mag.item())
             
             self.critic_optimizers[i].zero_grad()
@@ -318,7 +325,8 @@ class MARDPG_Baseline:
             q_values, _ = self.critics[i](obs, joint_actions, critic_hidden_actor[i], agent_idx=i)
             q_values = q_values.squeeze(-1)
             
-            a_loss = (-q_values * masks).sum() / (masks.sum() + 1e-8)
+            agent_mask = agent_masks[:, :, i]
+            a_loss = (-q_values * agent_mask).sum() / (agent_mask.sum() + 1e-8)
             actor_loss += a_loss
             
         actor_loss /= self.num_agents

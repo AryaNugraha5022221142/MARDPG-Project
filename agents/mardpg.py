@@ -191,6 +191,10 @@ class MARDPG:
         burn_in = self.seq_len // 4
         masks[:, :burn_in] = 0.0 # Set burn_in steps to 0
         
+        agent_masks = masks.unsqueeze(-1).repeat(1, 1, self.num_agents)
+        prev_dones = torch.cat([torch.zeros_like(dones[:, 0:1, :]), dones[:, :-1, :]], dim=1)
+        agent_masks = agent_masks * (1.0 - prev_dones)
+        
         # FIX 6d: Dedicated hidden-state tensors per forward-pass phase.
         # Prevents accidental reuse when new components are added (see audit Risk 5).
         actor_hidden_target  = [self.actor.init_hidden(self.batch_size, self.device) for _ in range(self.num_agents)]
@@ -225,12 +229,13 @@ class MARDPG:
             current_q = current_q_seq.squeeze(-1)
             
             # Critic loss (MSE over sequence with mask)
+            agent_mask = agent_masks[:, :, i]
             loss = F.mse_loss(current_q, target_q, reduction='none')
-            critic_loss = (loss * masks).sum() / (masks.sum() + 1e-8)
+            critic_loss = (loss * agent_mask).sum() / (agent_mask.sum() + 1e-8)
             critic_losses.append(critic_loss.item())
             
             # Track average Q-value magnitude (applied mask)
-            q_mag = (current_q.abs() * masks).sum() / (masks.sum() + 1e-8)
+            q_mag = (current_q.abs() * agent_mask).sum() / (agent_mask.sum() + 1e-8)
             q_value_mags.append(q_mag.item())
             
             # Optimize critic
@@ -274,7 +279,8 @@ class MARDPG:
             q_values = q_values.squeeze(-1) # (batch, seq)
             
             # Actor loss with mask
-            a_loss = (-q_values * masks).sum() / (masks.sum() + 1e-8)
+            agent_mask = agent_masks[:, :, i]
+            a_loss = (-q_values * agent_mask).sum() / (agent_mask.sum() + 1e-8)
             actor_loss += a_loss
             
         actor_loss /= self.num_agents

@@ -39,8 +39,8 @@ exploration:
 
 # FIX 1d: terminal bonuses now used by kinematic env baseline reward path
 rewards:
-  goal_bonus: 50.0
-  collision_penalty: -50.0
+  goal_bonus: 0.0
+  collision_penalty: 0.0
 
 environment:
   action_bound: 0.5235987756

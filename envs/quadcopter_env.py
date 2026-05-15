@@ -602,7 +602,7 @@ class QuadcopterEnv:
                 for j, t_pos in enumerate(self.sar_targets):
                     if j not in self.targets_claimed and np.linalg.norm(pos - t_pos) < target_radius:
                         self.targets_claimed.add(j)
-                        terminal_bonus += 50.0  # SAR bonus
+                        terminal_bonus += 5.0  # SAR bonus
                         self._update_sar_goals()
                         break
             
@@ -611,7 +611,7 @@ class QuadcopterEnv:
                 if self.scenario != 'search_and_rescue':
                     self.agent_dones[i] = True
                     info['agent_terminated_now'][i] = True
-                    terminal_bonus += self.reward_config.get('goal_bonus', 50.0)
+                    terminal_bonus += self.reward_config.get('goal_bonus', 0.0)
             
             # Collision check
             if not self.agent_dones[i] and d_min < self.collision_dist:
@@ -619,7 +619,7 @@ class QuadcopterEnv:
                 self._episode_collision = True
                 info['agent_terminated_now'][i] = True
                 info['collision'] = True
-                penalty = self.reward_config.get('collision_penalty', -20.0)
+                penalty = self.reward_config.get('collision_penalty', 0.0)
                 penalty_scale = 2.0
                 penalty *= penalty_scale
                 terminal_bonus += penalty

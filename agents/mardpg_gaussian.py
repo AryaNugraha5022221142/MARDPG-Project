@@ -155,8 +155,17 @@ class MARDPG_Gaussian:
         burn_in = self.seq_len // 4
         masks[:, :burn_in] = 0.0
         
-        actor_hidden = [self.actor.init_hidden(self.batch_size, self.device) for _ in range(self.num_agents)]
-        critic_hidden = [self.critics[i].init_hidden(self.batch_size, self.device) for i in range(self.num_agents)]
+        agent_masks = masks.unsqueeze(-1).repeat(1, 1, self.num_agents)
+        prev_dones = torch.cat([torch.zeros_like(dones[:, 0:1, :]), dones[:, :-1, :]], dim=1)
+        agent_masks = agent_masks * (1.0 - prev_dones)
+        
+        actor_hidden_target = [self.actor.init_hidden(self.batch_size, self.device) for _ in range(self.num_agents)]
+        actor_hidden_critic = [self.actor.init_hidden(self.batch_size, self.device) for _ in range(self.num_agents)]
+        actor_hidden_actor = [self.actor.init_hidden(self.batch_size, self.device) for _ in range(self.num_agents)]
+        
+        critic_hidden_update = [self.critics[i].init_hidden(self.batch_size, self.device) for i in range(self.num_agents)]
+        critic_hidden_target = [self.critics_target[i].init_hidden(self.batch_size, self.device) for i in range(self.num_agents)]
+        critic_hidden_actor = [self.critics[i].init_hidden(self.batch_size, self.device) for i in range(self.num_agents)]
         
         critic_losses = []
         
@@ -164,21 +173,22 @@ class MARDPG_Gaussian:
             next_actions_all = []
             for i in range(self.num_agents):
                 agent_next_obs = next_obs[:, :, i, :]
-                next_act, _, _ = self.actor_target(agent_next_obs, actor_hidden[i], agent_idx=i)
+                next_act, _, _ = self.actor_target(agent_next_obs, actor_hidden_target[i], agent_idx=i)
                 next_actions_all.append(next_act)
             next_actions_all = torch.stack(next_actions_all, dim=2)
             
         for i in range(self.num_agents):
             with torch.no_grad():
-                target_q_seq, _ = self.critics_target[i](next_obs, next_actions_all, critic_hidden[i], agent_idx=i)
+                target_q_seq, _ = self.critics_target[i](next_obs, next_actions_all, critic_hidden_target[i], agent_idx=i)
                 target_q_seq = target_q_seq.squeeze(-1)
                 target_q = rewards[:, :, i] + self.gamma * target_q_seq * (1 - dones[:, :, i])
                 
-            current_q_seq, _ = self.critics[i](obs, actions, critic_hidden[i], agent_idx=i)
+            current_q_seq, _ = self.critics[i](obs, actions, critic_hidden_update[i], agent_idx=i)
             current_q = current_q_seq.squeeze(-1)
             
+            agent_mask = agent_masks[:, :, i]
             loss = F.mse_loss(current_q, target_q, reduction='none')
-            critic_loss = (loss * masks).sum() / (masks.sum() + 1e-8)
+            critic_loss = (loss * agent_mask).sum() / (agent_mask.sum() + 1e-8)
             critic_losses.append(critic_loss.item())
             
             self.critic_optimizers[i].zero_grad()
@@ -186,10 +196,14 @@ class MARDPG_Gaussian:
             torch.nn.utils.clip_grad_norm_(self.critics[i].parameters(), self.max_grad_norm)
             self.critic_optimizers[i].step()
             
+        for i in range(self.num_agents):
+            for p in self.critics[i].parameters():
+                p.requires_grad_(False)
+                
         actor_loss = 0
         for i in range(self.num_agents):
             agent_i_obs = obs[:, :, i, :]
-            agent_i_act, _, _ = self.actor(agent_i_obs, actor_hidden[i], agent_idx=i)
+            agent_i_act, _, _ = self.actor(agent_i_obs, actor_hidden_actor[i], agent_idx=i)
             
             other_acts = []
             for j in range(self.num_agents):
@@ -198,15 +212,16 @@ class MARDPG_Gaussian:
                 else:
                     agent_j_obs = obs[:, :, j, :]
                     with torch.no_grad():
-                        a_j, _, _ = self.actor(agent_j_obs, actor_hidden[j], agent_idx=j)
+                        a_j, _, _ = self.actor(agent_j_obs, actor_hidden_critic[j], agent_idx=j)
                     other_acts.append(a_j.detach())
             
             joint_actions = torch.stack(other_acts, dim=2)
             
-            q_values, _ = self.critics[i](obs, joint_actions, critic_hidden[i], agent_idx=i)
+            q_values, _ = self.critics[i](obs, joint_actions, critic_hidden_actor[i], agent_idx=i)
             q_values = q_values.squeeze(-1)
             
-            a_loss = (-q_values * masks).sum() / (masks.sum() + 1e-8)
+            agent_mask = agent_masks[:, :, i]
+            a_loss = (-q_values * agent_mask).sum() / (agent_mask.sum() + 1e-8)
             actor_loss += a_loss
             
         actor_loss /= self.num_agents
@@ -215,6 +230,10 @@ class MARDPG_Gaussian:
         actor_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
         self.actor_optimizer.step()
+        
+        for i in range(self.num_agents):
+            for p in self.critics[i].parameters():
+                p.requires_grad_(True)
         
         self._soft_update(self.actor, self.actor_target)
         for i in range(self.num_agents):
