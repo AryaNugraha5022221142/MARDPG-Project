@@ -318,10 +318,14 @@ def main():
                 avg_act_std = current_act_std
                 
                 # FIX 5e: read current_sigma from AnnealedGaussianNoise for all agent types
-                if hasattr(agent, 'noise') and hasattr(agent.noise[0], 'current_sigma'):
-                    current_sigma = agent.noise[0].current_sigma
-                elif hasattr(agent, 'noise') and hasattr(agent.noise[0], 'sigma'):
-                    current_sigma = agent.noise[0].sigma
+                if hasattr(agent, 'noise'):
+                    noise_obj = agent.noise[0] if isinstance(agent.noise, list) else agent.noise
+                    if hasattr(noise_obj, 'current_sigma'):
+                        current_sigma = noise_obj.current_sigma
+                    elif hasattr(noise_obj, 'sigma'):
+                        current_sigma = noise_obj.sigma
+                    else:
+                        current_sigma = 0.0
                 else:
                     current_sigma = 0.0
                 
