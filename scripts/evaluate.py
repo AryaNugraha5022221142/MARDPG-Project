@@ -27,6 +27,37 @@ def main():
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
 
+    print(f"Loading checkpoint metadata from {args.checkpoint}...")
+    try:
+        state = torch.load(args.checkpoint, map_location='cpu', weights_only=False)
+        agent_actor_state = state.get('actor', state)
+        
+        # Deduce hidden_dim
+        for k, v in agent_actor_state.items():
+            if 'lstm.weight_ih_l0' in k:
+                hidden_dim = v.shape[0] // 4
+                config.setdefault('network', {}).setdefault('actor', {})['hidden_dim'] = hidden_dim
+                print(f"Auto-detected hidden_dim: {hidden_dim}")
+                break
+                
+        # Deduce num_agents
+        max_head = -1
+        for k in agent_actor_state.keys():
+            if 'heads.' in k:
+                try:
+                    head_idx = int(k.split('heads.')[1].split('.')[0])
+                    if head_idx > max_head:
+                        max_head = head_idx
+                except:
+                    pass
+        if max_head >= 0:
+            chkpt_num_agents = max_head + 1
+            config.setdefault('training', {})['num_agents'] = chkpt_num_agents
+            print(f"Auto-detected num_agents: {chkpt_num_agents}")
+            
+    except Exception as e:
+        print(f"Could not auto-detect checkpoint config (or not supported): {e}")
+
     device = torch.device("cuda" if torch.cuda.is_available() and config['training'].get('device') == 'cuda' else "cpu")
     
     env_config = config['environment'].copy()
