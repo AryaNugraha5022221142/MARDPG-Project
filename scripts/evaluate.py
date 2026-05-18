@@ -36,8 +36,11 @@ def main():
         for k, v in agent_actor_state.items():
             if 'lstm.weight_ih_l0' in k:
                 hidden_dim = v.shape[0] // 4
-                config.setdefault('network', {}).setdefault('actor', {})['hidden_dim'] = hidden_dim
-                config.setdefault('network', {}).setdefault('critic', {})['hidden_dim'] = hidden_dim
+                if 'network' not in config: config['network'] = {}
+                if 'actor' not in config['network']: config['network']['actor'] = {}
+                if 'critic' not in config['network']: config['network']['critic'] = {}
+                config['network']['actor']['hidden_dim'] = hidden_dim
+                config['network']['critic']['hidden_dim'] = hidden_dim
                 print(f"Auto-detected hidden_dim: {hidden_dim}")
                 break
                 
@@ -53,7 +56,8 @@ def main():
                     pass
         if max_head >= 0:
             chkpt_num_agents = max_head + 1
-            config.setdefault('training', {})['num_agents'] = chkpt_num_agents
+            if 'training' not in config: config['training'] = {}
+            config['training']['num_agents'] = chkpt_num_agents
             print(f"Auto-detected num_agents: {chkpt_num_agents}")
             
     except Exception as e:
@@ -166,11 +170,14 @@ def main():
                 done = terminated or truncated
                 steps += 1
                 
-            if ep < 5: # Save first 5 episodes for plotting
+            if ep < 10: # Save first 10 episodes for plotting
                 all_trajectories.append({
                     'paths': ep_trajectories,
                     'goals': env.goals.copy(),
-                    'obstacles': env.obstacles.copy()
+                    'obstacles': env.obstacles.copy(),
+                    'status': ep_agent_status.copy(),
+                    'successes': ep_agent_status.count('success'),
+                    'steps': steps
                 })
                 
             if args.render:
@@ -241,13 +248,19 @@ def main():
         plt.figure(figsize=(12, 12))
         plt.style.use('seaborn-v0_8-whitegrid')
         
-        # Plot the first successful episode's trajectory
-        plot_ep = 0
+        # Plot the best successful episode's trajectory
+        best_ep = 0
+        best_successes = -1
+        best_steps = 999999
         for i, ep_data in enumerate(all_trajectories):
-            # Prefer plotting a success if available
-            plot_ep = i
-            break 
+            succ = ep_data.get('successes', 0)
+            steps = ep_data.get('steps', 999999)
+            if succ > best_successes or (succ == best_successes and steps < best_steps):
+                best_successes = succ
+                best_steps = steps
+                best_ep = i
 
+        plot_ep = best_ep
         ep_data = all_trajectories[plot_ep]
         
         # Plot Obstacles
@@ -261,7 +274,7 @@ def main():
                 plt.gca().add_patch(circle)
                 
         # Plot Paths
-        colors = ['#c0392b', '#2980b9', '#27ae60', '#f39c12', '#8e44ad']
+        colors = ['#c0392b', '#2980b9', '#27ae60', '#f39c12', '#8e44ad', '#34495e', '#d35400']
         for i in range(env.num_agents):
             path = np.array(ep_data['paths'][i])
             if len(path) > 0:
@@ -275,7 +288,7 @@ def main():
 
         plt.xlim(0, env.arena_size[0])
         plt.ylim(0, env.arena_size[1])
-        plt.title(f'Navigation Trajectories ({args.agent.upper()}) - Evaluation Episode', fontsize=16, fontweight='bold')
+        plt.title(f'Navigation Trajectories ({args.agent.upper()}) 2D - Evaluation Episode', fontsize=16, fontweight='bold')
         plt.xlabel('X (m)', fontsize=14)
         plt.ylabel('Y (m)', fontsize=14)
         plt.legend(loc='upper right')
@@ -286,6 +299,45 @@ def main():
         plt.savefig(output_path, dpi=300)
         print(f"Trajectory plot saved to {output_path}")
         plt.close() # Close trajectory plot
+        
+        # 3D Plotting
+        fig = plt.figure(figsize=(12, 12))
+        ax = fig.add_subplot(111, projection='3d')
+        
+        for i in range(env.num_agents):
+            path = np.array(ep_data['paths'][i])
+            if len(path) > 0:
+                ax.plot(path[:, 0], path[:, 1], path[:, 2], color=colors[i % len(colors)], label=f'UAV {i+1}', linewidth=2.5)
+                ax.scatter(path[0, 0], path[0, 1], path[0, 2], color='red', marker='o', s=100, label='Start' if i==0 else "")
+            
+            ax.scatter(ep_data['goals'][i][0], ep_data['goals'][i][1], ep_data['goals'][i][2], color='green', marker='*', s=250, label='Goal' if i==0 else "")
+            
+        # Optional: draw basic 3d obstacles if needed
+        for obs_item in ep_data['obstacles']:
+            if obs_item['type'] == 'box':
+                pos = obs_item['pos']
+                size = obs_item['size']
+                # Simplified 3D bounding box for box
+                x_, y_, z_ = pos[0], pos[1], pos[2]
+                dx, dy, dz = size[0]/2, size[1]/2, size[2]/2
+                # Plot center points for simplicity
+                ax.scatter(x_, y_, z_, color='gray', marker='s', s=200, alpha=0.4)
+            else:
+                ax.scatter(obs_item['pos'][0], obs_item['pos'][1], obs_item['pos'][2], color='gray', marker='o', s=200, alpha=0.4)
+                
+        ax.set_xlim(0, env.arena_size[0])
+        ax.set_ylim(0, env.arena_size[1])
+        ax.set_zlim(0, env.arena_size[2])
+        ax.set_title(f'Navigation Trajectories ({args.agent.upper()}) 3D - Evaluation', fontsize=16, fontweight='bold')
+        ax.set_xlabel('X (m)')
+        ax.set_ylabel('Y (m)')
+        ax.set_zlabel('Z (m)')
+        ax.legend(loc='upper right')
+        
+        output_path_3d = os.path.join(config['logging']['log_dir'], 'evaluation_trajectories_3d.png')
+        plt.savefig(output_path_3d, dpi=300)
+        print(f"3D Trajectory plot saved to {output_path_3d}")
+        plt.close()
     else:
         print("No complete trajectories to plot. Skipping trajectory chart.")
 
