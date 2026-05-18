@@ -37,6 +37,7 @@ def main():
             if 'lstm.weight_ih_l0' in k:
                 hidden_dim = v.shape[0] // 4
                 config.setdefault('network', {}).setdefault('actor', {})['hidden_dim'] = hidden_dim
+                config.setdefault('network', {}).setdefault('critic', {})['hidden_dim'] = hidden_dim
                 print(f"Auto-detected hidden_dim: {hidden_dim}")
                 break
                 
