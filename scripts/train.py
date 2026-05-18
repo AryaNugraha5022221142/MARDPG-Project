@@ -46,6 +46,7 @@ def main():
     parser.add_argument('--render', action='store_true', help='Enable 3D visualization during training')
     parser.add_argument('--sensor-noise', type=float, default=0.02, help='Sensor noise standard deviation')
     parser.add_argument('--reward-type', type=str, default='baseline', choices=['baseline', 'linear', 'exponential'], help='Reward function type')
+    parser.add_argument('--resume', type=str, nargs='?', const='latest', default=None, help='Resume from checkpoint. Provide path to .pt file or "latest"')
     args = parser.parse_args()
 
     with open(args.config, 'r') as f:
@@ -155,13 +156,63 @@ def main():
     recent_act_stds = deque(maxlen=100)
     global_step_count = 0
     
+    start_episode = 1
+    if args.resume:
+        checkpoint_path = args.resume
+        if checkpoint_path == 'latest':
+            import glob
+            import os
+            # First check if the final save exists (which happens on keyboard interrupt)
+            final_path = os.path.join(config['logging']['checkpoint_dir'], f"{args.agent}_final.pt")
+            checkpoints = glob.glob(os.path.join(config['logging']['checkpoint_dir'], f"{args.agent}_ep*.pt"))
+            
+            latest_path = None
+            latest_ep = -1
+            if checkpoints:
+                def extract_ep(f):
+                    try:
+                        return int(f.split('_ep')[-1].split('.pt')[0])
+                    except:
+                        return -1
+                checkpoints.sort(key=extract_ep)
+                latest_path = checkpoints[-1]
+                latest_ep = extract_ep(latest_path)
+                
+            if os.path.exists(final_path):
+                # The final path might not encode the episode in its name, but if it exists 
+                # after a crash/interrupt, it's usually the latest. 
+                # We can load it and determine the episode. But for simplicity, let's prefer final_path 
+                # if its modification time is newer.
+                if latest_path:
+                    if os.path.getmtime(final_path) > os.path.getmtime(latest_path):
+                        checkpoint_path = final_path
+                    else:
+                        checkpoint_path = latest_path
+                else:
+                    checkpoint_path = final_path
+            elif latest_path:
+                checkpoint_path = latest_path
+            else:
+                print("No checkpoints found. Starting from scratch.")
+                checkpoint_path = None
+        
+        if checkpoint_path and os.path.exists(checkpoint_path):
+            print(f"Loading checkpoint from {checkpoint_path}...")
+            _, ep = agent.load(checkpoint_path)
+            start_episode = ep + 1
+            print(f"Resuming from episode {start_episode}")
+        elif checkpoint_path:
+            print(f"Checkpoint {checkpoint_path} not found. Starting from scratch.")
+
     print(f"Starting training for {num_episodes} episodes...")
 
     # FIX 2d: Paper trains on four scene types randomly selected each episode.
     # Define the rotation list here so it can be extended easily.
     PAPER_SCENES = ['pillars', 'cylinders', 'forest', 'rings']
 
-    pbar = tqdm(range(1, num_episodes + 1), desc="Training")
+    pbar = tqdm(range(start_episode, num_episodes + 1), desc="Training")
+    pbar.initial = start_episode - 1
+    pbar.total = num_episodes
     try:
         for episode in pbar:
             if episode == warmup_until:
@@ -264,8 +315,9 @@ def main():
             recent_rewards.append(episode_reward)
             recent_success.append(info.get('individual_success_rate', 0.0))
             recent_lengths.append(episode_length)
-            recent_collisions.append(float(episode_collision))
+            
             agent_col_rate = info.get('agent_collision', np.zeros(current_num_agents, dtype=bool)).sum() / current_num_agents
+            recent_collisions.append(agent_col_rate)
             recent_collisions_per_agent.append(agent_col_rate)
             recent_sat_rates.append(np.mean(episode_sat_rates))
             recent_act_stds.append(np.mean(episode_act_stds))
@@ -283,7 +335,7 @@ def main():
             reward_history.append(episode_reward)
             success_history.append(info.get('individual_success_rate', 0.0))
             length_history.append(episode_length)
-            collision_history.append(float(episode_collision))
+            collision_history.append(agent_col_rate)
             
             hidden_state_norm_history.append(np.mean(episode_h_norms) if hasattr(agent, 'actor') and args.agent in ['mardpg', 'iddpg', 'mardpg_g'] else np.nan)
             tracking_error_history.append(np.mean(episode_tracking_errors))
@@ -362,6 +414,8 @@ def main():
             if episode % config['logging']['save_interval'] == 0:
                 save_path = os.path.join(config['logging']['checkpoint_dir'], f"{args.agent}_ep{episode}.pt")
                 agent.save(save_path, 0.0, episode)
+                # Print log to inform that the checkpoint was successfully saved
+                print(f"Checkpoint saved: {save_path}")
                 
         if args.render:
             env.close()
@@ -407,6 +461,7 @@ def main():
     plt.title(f'Reward during all the training episodes ({args.agent.upper()})', fontsize=14, fontweight='bold')
     plt.xlabel('Number of history trajectories (Episodes)', fontsize=12)
     plt.ylabel('Reward', fontsize=12)
+    plt.ylim([-700, 700])
     plt.legend()
     plt.grid(True, linestyle=':', alpha=0.6)
     plt.savefig(os.path.join(config['logging']['log_dir'], f'learning_curve_reward_{args.agent}.png'), dpi=300)

@@ -16,6 +16,7 @@ The goal of this project is to train multiple UAVs (quadcopters) to navigate fro
 - **Complex 3D Environment**: A custom environment built with realistic quadcopter dynamics and varied obstacle shapes (spheres and boxes).
 - **Dynamic Obstacles**: Real-time moving threats to test the agents' predictive capabilities.
 - **3D Visualization**: Real-time rendering using Matplotlib for monitoring agent behavior.
+- **Weights & Biases Integration**: Live tracking of training metrics, rewards, and success rates.
 
 ## 📦 Installation
 
@@ -66,6 +67,37 @@ To test a trained model:
 python scripts/evaluate.py --config config/config.yaml --checkpoint checkpoints/mardpg_final.pt --render
 ```
 
+## 🌍 Environment Scenarios
+You can test the algorithms in different scenarios by using the `--scenario` flag in the scripts:
+- `empty`: No obstacles, pure navigation test.
+- `static_dense`: 40 static obstacles, high density.
+- `dynamic_chaos`: 20 obstacles, 80% are moving dynamically.
+- `narrow_passage`: A real wall with a gap that agents must navigate through.
+- `city`: **Urban Canyon** - High-rise buildings in a grid with No-Fly Zones and altitude limits.
+- `warzone`: **Contested Airspace** - Terrain masking, Radar detection zones (yellow), and lethal Missile envelopes (red).
+- `forest`: **Under-canopy** - Dense trunks (brown) and branches (green) requiring precise navigation.
+
+## 🏗️ Environment Structure
+- **State Space (34D)**: 25 rangefinder rays (5x5 grid) + 5D relative goal info + 3D normalized velocity + 1D saturation indicator.
+- **Action Space (4D Continuous)**: Pitch, Roll, Throttle, Yaw rate commands processed internally.
+- **Dynamics**: Simplified 3D quadcopter physics with inertia and drag.
+
+## ☁️ Google Colab Workflow
+
+For heavy training, use Google Colab to leverage free GPU resources:
+
+1. Open a new notebook in Colab.
+2. Set Runtime Type to **T4 GPU**.
+3. Mount Google Drive and clone this repo.
+4. Run the training script without the `--render` flag for maximum speed.
+
+## 📂 Project Structure
+
+- `agents/`: MARDPG implementation and Neural Network architectures.
+- `envs/`: Quadcopter dynamics and 3D environment logic.
+- `config/`: Hyperparameter settings and environment configurations.
+- `scripts/`: Entry points for training, evaluation, and analysis.
+- `tests/`: Automated verification tests.
 
 ## 📄 License
 This project is part of a Master's/Bachelor's Thesis. All rights reserved.
