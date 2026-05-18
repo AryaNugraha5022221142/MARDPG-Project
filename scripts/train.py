@@ -161,7 +161,6 @@ def main():
         checkpoint_path = args.resume
         if checkpoint_path == 'latest':
             import glob
-            import os
             # First check if the final save exists (which happens on keyboard interrupt)
             final_path = os.path.join(config['logging']['checkpoint_dir'], f"{args.agent}_final.pt")
             checkpoints = glob.glob(os.path.join(config['logging']['checkpoint_dir'], f"{args.agent}_ep*.pt"))
