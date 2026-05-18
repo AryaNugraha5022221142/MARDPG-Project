@@ -209,9 +209,7 @@ def main():
     # Define the rotation list here so it can be extended easily.
     PAPER_SCENES = ['pillars', 'cylinders', 'forest', 'rings']
 
-    pbar = tqdm(range(start_episode, num_episodes + 1), desc="Training")
-    pbar.initial = start_episode - 1
-    pbar.total = num_episodes
+    pbar = tqdm(range(start_episode, num_episodes + 1), desc="Training", initial=start_episode - 1, total=num_episodes)
     try:
         for episode in pbar:
             if episode == warmup_until:
