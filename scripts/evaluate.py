@@ -20,7 +20,7 @@ def main():
     parser.add_argument('--agent', type=str, default='mardpg', choices=['mardpg', 'iddpg', 'mardpg_g', 'mardpg_baseline'], help='Agent type to evaluate')
     parser.add_argument('--scenario', type=str, default=None, help='Scenario name')
     parser.add_argument('--level', type=int, default=None, help='Curriculum level to evaluate on (0-4)')
-    parser.add_argument('--episodes', type=int, default=100)
+    parser.add_argument('--episodes', type=int, default=250)
     parser.add_argument('--render', action='store_true', help='Enable 3D visualization')
     args = parser.parse_args()
 
@@ -314,16 +314,24 @@ def main():
             
         # Optional: draw basic 3d obstacles if needed
         for obs_item in ep_data['obstacles']:
+            pos = obs_item['pos']
             if obs_item['type'] == 'box':
-                pos = obs_item['pos']
                 size = obs_item['size']
-                # Simplified 3D bounding box for box
-                x_, y_, z_ = pos[0], pos[1], pos[2]
-                dx, dy, dz = size[0]/2, size[1]/2, size[2]/2
-                # Plot center points for simplicity
-                ax.scatter(x_, y_, z_, color='gray', marker='s', s=200, alpha=0.4)
+                # Draw 3D Box/Pillar
+                x_, y_, z_ = pos[0]-size[0]/2, pos[1]-size[1]/2, pos[2]-size[2]/2
+                dx, dy, dz = size[0], size[1], size[2]
+                ax.bar3d(x_, y_, z_, dx, dy, dz, color='gray', alpha=0.3)
+            elif obs_item['type'] == 'cylinder':
+                radius = obs_item.get('radius', 1.0)
+                height = obs_item.get('height', 10.0)
+                if 'size' in obs_item: # Fallback if size is dict
+                    size = obs_item['size']
+                    radius = size[0]/2
+                    height = size[2]
+                x_, y_, z_ = pos[0]-radius, pos[1]-radius, pos[2]-height/2
+                ax.bar3d(x_, y_, z_, radius*2, radius*2, height, color='gray', alpha=0.3)
             else:
-                ax.scatter(obs_item['pos'][0], obs_item['pos'][1], obs_item['pos'][2], color='gray', marker='o', s=200, alpha=0.4)
+                ax.scatter(pos[0], pos[1], pos[2], color='gray', marker='o', s=200, alpha=0.4)
                 
         ax.set_xlim(0, env.arena_size[0])
         ax.set_ylim(0, env.arena_size[1])
