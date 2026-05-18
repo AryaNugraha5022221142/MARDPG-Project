@@ -68,6 +68,10 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
                     })
             elif self.scenario_obs_type == 'box':
                 size = np.random.uniform(0.5, 2.0, size=3)
+                if self.scenario == 'pillars':
+                    h = np.random.uniform(10.0, self.arena_size[2])
+                    size[2] = h
+                    pos[2] = h / 2.0
                 valid = True
                 for obs in self.obstacles:
                     o_r = np.max(obs.get('size', [obs.get('radius', 1.0)]))
