@@ -36,7 +36,23 @@ class BenchmarkWrappedEnv(QuadcopterKinematicEnv):
                 self.obstacles.append({
                     'type': 'sphere', 
                     'pos': o.position.copy(), 
-                    'radius': np.max(o.dimensions) / 2.0
+                    'radius': np.max(o.dimensions) / 2.0,
+                    'color': o.color
+                })
+            elif rtype == 'cylinder':
+                radius, _, height = o.dimensions
+                # For physics, treat as box, but store original cylinder size
+                size = np.array([radius*2, radius*2, height])
+                pos = o.position.copy()
+                pos[2] += height / 2.0 # center Z for box collision logic
+                self.obstacles.append({
+                    'type': 'cylinder', 
+                    'pos': pos, 
+                    'size': size,
+                    'orig_pos': o.position.copy(),
+                    'radius': radius,
+                    'height': height,
+                    'color': o.color
                 })
             else:
                 lo, hi = o.aabb
@@ -45,7 +61,8 @@ class BenchmarkWrappedEnv(QuadcopterKinematicEnv):
                 self.obstacles.append({
                     'type': 'box', 
                     'pos': pos, 
-                    'size': size
+                    'size': size,
+                    'color': o.color
                 })
         
         self.agents_init_positions = [p.copy() for p in self.b_env.agents]

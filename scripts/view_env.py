@@ -48,7 +48,7 @@ class MatplotlibVisualizer:
         # Scatters for agents and goals
         self.agent_scatter = self.ax.scatter([], [], [], c='b', marker='^', s=100, label='Agents')
         self.goal_scatter = self.ax.scatter([], [], [], c='r', marker='x', s=100, label='Goals')
-        self.ax.legend()
+        self.ax.legend(loc='upper right')
         
     def _plot_cuboid(self, pos, dim, rot, color):
         dx, dy, dz = dim

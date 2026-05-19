@@ -94,7 +94,7 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
                         valid = False; break
                 if valid:
                     self.obstacles.append({
-                        'type': 'box', 'pos': pos, 'size': size, # Treat as box for physics simplification
+                        'type': 'cylinder', 'pos': pos, 'size': size, # Treat as box for physics simplification
                         'vel': vel, 'origin': pos.copy(), 'phase': phase, 'freq': freq
                     })
             elif self.scenario_obs_type == 'irregular':
@@ -150,8 +150,8 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
         sphere_pos = np.array([o['pos'] for o in self.obstacles if o['type'] == 'sphere'])
         sphere_rad = np.array([o['radius'] for o in self.obstacles if o['type'] == 'sphere'])
         
-        box_min = np.array([o['pos'] - o['size']/2 for o in self.obstacles if o['type'] == 'box'])
-        box_max = np.array([o['pos'] + o['size']/2 for o in self.obstacles if o['type'] == 'box'])
+        box_min = np.array([o['pos'] - o['size']/2 for o in self.obstacles if o['type'] in ('box', 'cylinder')])
+        box_max = np.array([o['pos'] + o['size']/2 for o in self.obstacles if o['type'] in ('box', 'cylinder')])
         
         for i in range(self.num_agents):
             state = self.agents[i].state

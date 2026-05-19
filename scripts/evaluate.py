@@ -242,12 +242,19 @@ def main():
         
         # Plot Obstacles
         for obs_item in ep_data['obstacles']:
+            color = obs_item.get('color', 'gray')
             if obs_item['type'] == 'box':
                 rect = plt.Rectangle((obs_item['pos'][0]-obs_item['size'][0]/2, obs_item['pos'][1]-obs_item['size'][1]/2), 
-                                     obs_item['size'][0], obs_item['size'][1], color='gray', alpha=0.4)
+                                     obs_item['size'][0], obs_item['size'][1], color=color, alpha=0.4)
                 plt.gca().add_patch(rect)
+            elif obs_item['type'] == 'cylinder':
+                radius = obs_item.get('radius', 1.0)
+                if 'size' in obs_item:
+                    radius = obs_item['size'][0]/2
+                circle = plt.Circle((obs_item['pos'][0], obs_item['pos'][1]), radius, color=color, alpha=0.4)
+                plt.gca().add_patch(circle)
             else:
-                circle = plt.Circle((obs_item['pos'][0], obs_item['pos'][1]), obs_item['radius'], color='gray', alpha=0.4)
+                circle = plt.Circle((obs_item['pos'][0], obs_item['pos'][1]), obs_item.get('radius', 1.5), color=color, alpha=0.4)
                 plt.gca().add_patch(circle)
                 
         # Plot Paths
@@ -292,23 +299,31 @@ def main():
         # Optional: draw basic 3d obstacles if needed
         for obs_item in ep_data['obstacles']:
             pos = obs_item['pos']
+            color = obs_item.get('color', 'gray')
             if obs_item['type'] == 'box':
                 size = obs_item['size']
                 # Draw 3D Box/Pillar
                 x_, y_, z_ = pos[0]-size[0]/2, pos[1]-size[1]/2, pos[2]-size[2]/2
                 dx, dy, dz = size[0], size[1], size[2]
-                ax.bar3d(x_, y_, z_, dx, dy, dz, color='gray', alpha=0.3)
+                ax.bar3d(x_, y_, z_, dx, dy, dz, color=color, alpha=0.3)
             elif obs_item['type'] == 'cylinder':
                 radius = obs_item.get('radius', 1.0)
                 height = obs_item.get('height', 10.0)
-                if 'size' in obs_item: # Fallback if size is dict
-                    size = obs_item['size']
-                    radius = size[0]/2
-                    height = size[2]
-                x_, y_, z_ = pos[0]-radius, pos[1]-radius, pos[2]-height/2
-                ax.bar3d(x_, y_, z_, radius*2, radius*2, height, color='gray', alpha=0.3)
+                orig_pos = obs_item.get('orig_pos', pos)
+                z_base = orig_pos[2]
+                z_cyl = np.linspace(z_base, z_base + height, 2)
+                theta = np.linspace(0, 2*np.pi, 40)
+                theta_grid, z_grid = np.meshgrid(theta, z_cyl)
+                x_grid = radius * np.cos(theta_grid) + orig_pos[0]
+                y_grid = radius * np.sin(theta_grid) + orig_pos[1]
+                ax.plot_surface(x_grid, y_grid, z_grid, color=color, alpha=0.6, antialiased=True, shade=True)
             else:
-                ax.scatter(pos[0], pos[1], pos[2], color='gray', marker='o', s=200, alpha=0.4)
+                rg = obs_item.get('radius', 1.5)
+                u, v = np.mgrid[0:2*np.pi:20j, 0:np.pi:10j]
+                x = rg * np.cos(u) * np.sin(v) + pos[0]
+                y = rg * np.sin(u) * np.sin(v) + pos[1]
+                z = rg * np.cos(v) + pos[2]
+                ax.plot_surface(x, y, z, color=color, alpha=0.6, antialiased=True, shade=True)
                 
         ax.set_xlim(0, env.arena_size[0])
         ax.set_ylim(0, env.arena_size[1])

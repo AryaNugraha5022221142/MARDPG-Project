@@ -22,6 +22,7 @@ def main():
     parser.add_argument('--episodes', type=int, default=10, help='Episodes per benchmark scene')
     parser.add_argument('--num_agents', type=int, default=10, help='Number of UAVs')
     parser.add_argument('--level', type=int, default=3, help='Difficulty level (1-5), 3=MEDIUM')
+    parser.add_argument('--scenario', type=str, default=None, help='Specific scenario to evaluate (default: all)')
     args = parser.parse_args()
 
     with open(args.config, 'r') as f:
@@ -105,6 +106,12 @@ def main():
         agent.load(args.checkpoint)
 
     scenes = list(BenchmarkSuite.REGISTRY.keys())
+    if args.scenario:
+        if args.scenario in scenes:
+            scenes = [args.scenario]
+        else:
+            print(f"Scenario '{args.scenario}' not found in registry. Options: {scenes}")
+            sys.exit(1)
     
     results = {}
     
