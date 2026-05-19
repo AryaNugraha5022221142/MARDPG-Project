@@ -24,7 +24,7 @@ def main():
     parser.add_argument('--scenes', type=str, default='all', help='Comma separated scenes or "all"')
     parser.add_argument('--scenario', type=str, default=None, help='Specific scenario name')
     parser.add_argument('--legacy-random-env', action='store_true')
-    parser.add_argument('--num-agents', type=int, default=10)
+    parser.add_argument('--num-agents', type=int, default=None)
     parser.add_argument('--level', type=int, default=3)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--episodes', type=int, default=10)
@@ -37,7 +37,7 @@ def main():
         config = yaml.safe_load(f)
 
     device = torch.device("cuda" if torch.cuda.is_available() and config['training'].get('device') == 'cuda' else "cpu")
-    num_agents = args.num_agents
+    num_agents = args.num_agents if args.num_agents is not None else config['training'].get('num_agents', 5)
     
     if args.legacy_random_env:
         scenes = ['legacy']
@@ -59,11 +59,7 @@ def main():
         device=device
     )
     
-    try:
-        agent.load(args.checkpoint, robust=True)
-    except Exception as e:
-        print(f"Warning: Failed robust loading, attempting standard load. {e}")
-        agent.load(args.checkpoint)
+    agent.load(args.checkpoint)
 
     env_config = config['environment'].copy()
     env_config['seed'] = args.seed
