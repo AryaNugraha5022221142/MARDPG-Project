@@ -15,6 +15,8 @@ from tqdm import tqdm
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from envs import QuadcopterKinematicEnv
+from envs.benchmark_wrapped_env import BenchmarkWrappedEnv
+from envs.base_env import DifficultyLevel
 from agents import MARDPG, MARDPG_Gaussian
 
 def _make_agent(agent_type, obs_dim, action_dim, num_agents, config, device):
@@ -75,12 +77,25 @@ def main():
     env_config['sensor_noise_std'] = args.sensor_noise
     env_config['reward_type'] = args.reward_type
 
-    env = QuadcopterKinematicEnv(
-        num_agents=config['training']['num_agents'], 
-        config=env_config,
-        render_mode='human' if args.render else None,
-        scenario=args.scenario
-    )
+    env_level = config['environment'].get('level', 3)
+    
+    if args.scenario is None or args.scenario in ["urban", "forest", "terrain", "structured", "dynamic"]:
+        scenario_name = args.scenario if args.scenario else "urban"
+        env = BenchmarkWrappedEnv(
+            benchmark_name=scenario_name,
+            level=env_level,
+            num_agents=config['training']['num_agents'], 
+            config=env_config
+        )
+        if args.render:
+            env.render_mode = 'human'
+    else:
+        env = QuadcopterKinematicEnv(
+            num_agents=config['training']['num_agents'], 
+            config=env_config,
+            render_mode='human' if args.render else None,
+            scenario=args.scenario
+        )
 
     # Agent
     obs_dim = env.obs_dim
@@ -133,9 +148,20 @@ def main():
 
     # Re-create env and agent with starting agents
     env_config_start = env_config.copy()
-    env = QuadcopterKinematicEnv(num_agents=current_num_agents, config=env_config_start,
-                        render_mode='human' if args.render else None,
-                        scenario=args.scenario)
+    if args.scenario is None or args.scenario in ["urban", "forest", "terrain", "structured", "dynamic"]:
+        scenario_name = args.scenario if args.scenario else "urban"
+        env = BenchmarkWrappedEnv(
+            benchmark_name=scenario_name,
+            level=env_level,
+            num_agents=current_num_agents, 
+            config=env_config_start
+        )
+        if args.render:
+            env.render_mode = 'human'
+    else:
+        env = QuadcopterKinematicEnv(num_agents=current_num_agents, config=env_config_start,
+                            render_mode='human' if args.render else None,
+                            scenario=args.scenario)
     agent = _make_agent(args.agent, obs_dim, 2, current_num_agents, config, device)
     
     # Academic Data Tracking
@@ -205,9 +231,9 @@ def main():
 
     print(f"Starting training for {num_episodes} episodes...")
 
-    # FIX 2d: Paper trains on four scene types randomly selected each episode.
+    # FIX 2d: Paper trains on five benchmark scene types randomly selected each episode.
     # Define the rotation list here so it can be extended easily.
-    PAPER_SCENES = ['pillars', 'cylinders', 'forest', 'rings']
+    PAPER_SCENES = ["urban", "forest", "terrain", "structured", "dynamic"]
 
     pbar = tqdm(range(start_episode, num_episodes + 1), desc="Training", initial=start_episode - 1, total=num_episodes)
     try:
