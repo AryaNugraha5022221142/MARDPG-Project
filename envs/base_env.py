@@ -439,6 +439,13 @@ class BaseEnvironment(abc.ABC):
         margin = cfg.collision_threshold + cfg.agent_radius + 1.0
         positions = []
 
+        def valid_pos(p):
+            if self.is_collision(p): return False
+            for prev_p in positions:
+                if np.linalg.norm(p - prev_p) < (cfg.agent_radius * 2 + 1.0):
+                    return False
+            return True
+
         if mode == "corners":
             corners = [
                 np.array([margin, margin, 1.5]),
@@ -448,15 +455,15 @@ class BaseEnvironment(abc.ABC):
             ]
             for i in range(n):
                 c = corners[i % len(corners)]
-                if self.is_collision(c):
+                if not valid_pos(c):
                     # Try to find a free space nearby
                     found = False
-                    for radius in np.arange(1.0, 5.0, 0.5):
-                        for angle in np.linspace(0, 2 * np.pi, 8):
+                    for radius in np.arange(1.0, 10.0, 0.5):
+                        for angle in np.linspace(0, 2 * np.pi, 16):
                             test_c = c + np.array([radius * np.cos(angle), radius * np.sin(angle), 0])
                             test_c[0] = np.clip(test_c[0], margin, cfg.map_width - margin)
                             test_c[1] = np.clip(test_c[1], margin, cfg.map_depth - margin)
-                            if not self.is_collision(test_c):
+                            if valid_pos(test_c):
                                 c = test_c
                                 found = True
                                 break
