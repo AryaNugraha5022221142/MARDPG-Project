@@ -1,4 +1,3 @@
-# scripts/evaluate.py
 import argparse
 import yaml
 import os
@@ -6,361 +5,239 @@ import sys
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
+import json
+import csv
 
-# Add the project root to the Python path so it can find 'envs' and 'agents'
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from envs import QuadcopterKinematicEnv
+from envs import BenchmarkSuite, QuadcopterKinematicEnv
+from envs.benchmark_wrapped_env import BenchmarkWrappedEnv
 from agents import MARDPG_Baseline
+
+BENCHMARK_SCENES = tuple(BenchmarkSuite.REGISTRY.keys())
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='config/config.yaml')
     parser.add_argument('--checkpoint', type=str, required=True)
-    parser.add_argument('--agent', type=str, default='mardpg_baseline', choices=['mardpg_baseline'], help='Agent type to evaluate')
-    parser.add_argument('--scenario', type=str, default=None, help='Scenario name')
-    parser.add_argument('--level', type=int, default=None, help='Curriculum level to evaluate on (0-4)')
-    parser.add_argument('--episodes', type=int, default=250)
-    parser.add_argument('--render', action='store_true', help='Enable 3D visualization')
+    parser.add_argument('--agent', type=str, default='mardpg_baseline', choices=['mardpg_baseline'])
+    parser.add_argument('--scenes', type=str, default='all', help='Comma separated scenes or "all"')
+    parser.add_argument('--scenario', type=str, default=None, help='Specific scenario name')
+    parser.add_argument('--legacy-random-env', action='store_true')
+    parser.add_argument('--num-agents', type=int, default=10)
+    parser.add_argument('--level', type=int, default=3)
+    parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--episodes', type=int, default=10)
+    parser.add_argument('--output-json', type=str, default='logs/multi_scene_evaluation_results.json')
+    parser.add_argument('--output-csv', type=str, default='logs/multi_scene_evaluation_results.csv')
+    parser.add_argument('--output-plot', type=str, default='logs/multi_scene_evaluation_metrics.png')
     args = parser.parse_args()
 
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
 
-    print(f"Loading checkpoint metadata from {args.checkpoint}...")
-    try:
-        state = torch.load(args.checkpoint, map_location='cpu', weights_only=False)
-        agent_actor_state = state.get('actor', state)
-        
-        # Deduce hidden_dim
-        for k, v in agent_actor_state.items():
-            if 'lstm.weight_ih_l0' in k:
-                hidden_dim = v.shape[0] // 4
-                if 'network' not in config: config['network'] = {}
-                if 'actor' not in config['network']: config['network']['actor'] = {}
-                if 'critic' not in config['network']: config['network']['critic'] = {}
-                config['network']['actor']['hidden_dim'] = hidden_dim
-                config['network']['critic']['hidden_dim'] = hidden_dim
-                print(f"Auto-detected hidden_dim: {hidden_dim}")
-                break
-                
-        # Deduce num_agents
-        max_head = -1
-        for k in agent_actor_state.keys():
-            if 'heads.' in k:
-                try:
-                    head_idx = int(k.split('heads.')[1].split('.')[0])
-                    if head_idx > max_head:
-                        max_head = head_idx
-                except:
-                    pass
-        if max_head >= 0:
-            chkpt_num_agents = max_head + 1
-            if 'training' not in config: config['training'] = {}
-            config['training']['num_agents'] = chkpt_num_agents
-            print(f"Auto-detected num_agents: {chkpt_num_agents}")
-            
-    except Exception as e:
-        print(f"Could not auto-detect checkpoint config (or not supported): {e}")
-
     device = torch.device("cuda" if torch.cuda.is_available() and config['training'].get('device') == 'cuda' else "cpu")
+    num_agents = args.num_agents
     
-    env_config = config['environment'].copy()
-    env_config['agent_id_dim'] = config['training']['num_agents']
-    
-    env = QuadcopterKinematicEnv(
-        num_agents=config['training']['num_agents'], 
-        config=env_config,
-        render_mode='human' if args.render else None,
-        scenario=args.scenario
-    )
-    
-    if args.level is not None and args.scenario is None:
-        env.set_curriculum_level(args.level)
-        print(f"Evaluating on Curriculum Level {args.level}")
-        
-    obs_dim = env.obs_dim
-    
-    if args.agent == 'mardpg_baseline':
-        agent = MARDPG_Baseline(
-            obs_dim=obs_dim, 
-            action_dim=2, 
-            num_agents=config['training']['num_agents'], 
-            config=config, 
-            device=device,
-            independent_critics=False
-        )
+    if args.legacy_random_env:
+        scenes = ['legacy']
     else:
-        raise ValueError(f"Unknown agent type {args.agent}")
+        if args.scenario:
+            scenes = [args.scenario]
+        else:
+            if args.scenes.lower() == 'all':
+                scenes = list(BENCHMARK_SCENES)
+            else:
+                scenes = args.scenes.split(',')
+
+    obs_dim = 30
+    agent_config = {
+        'actor_lr': config['learning']['actor_lr'],
+        'critic_lr': config['learning']['critic_lr'],
+        'gamma': config['learning']['gamma'],
+        'hidden_dim': config['network']['actor']['hidden_dim'],
+        'lstm_layers': config['network']['actor']['lstm_layers'],
+        'obs_dim': obs_dim,
+        'action_dim': 2,
+        'num_agents': num_agents,
+        'max_grad_norm': config['learning']['max_grad_norm'],
+        'device': device
+    }
     
-    agent.load(args.checkpoint)
-    print(f"Loaded checkpoint from {args.checkpoint}")
-    
-    successes = 0
-    collisions = 0
-    times_to_goal = []
-    
-    # Advanced EE Metrics
-    all_jerks = []
-    all_safety_frontiers = []
-    agent_success_counts = np.zeros(env.num_agents)
-    path_lengths = []
-    ideal_lengths = []
-    
-    # Trajectory storage for plotting (first 5 episodes)
-    all_trajectories = []
-    
-    ep_agent_status = ['trapped'] * env.num_agents
-    
+    agent = MARDPG_Baseline(agent_config)
     try:
+        agent.load(args.checkpoint, robust=True)
+    except Exception as e:
+        print(f"Warning: Failed robust loading, attempting standard load. {e}")
+        agent.load(args.checkpoint)
+
+    env_config = config['environment'].copy()
+    env_config['seed'] = args.seed
+    
+    all_results = {}
+    
+    for scene in scenes:
+        print(f"\nEvaluating scene: {scene}")
+        if scene == 'legacy':
+            env = QuadcopterKinematicEnv(
+                num_agents=num_agents, 
+                config=env_config,
+                render_mode=None
+            )
+        else:
+            env = BenchmarkWrappedEnv(
+                benchmark_name=scene,
+                level=args.level,
+                num_agents=num_agents,
+                config=env_config
+            )
+            
+        scene_metrics = {
+            'success': [],
+            'collision': [],
+            'trapped': [],
+            'path_efficiency': [],
+            'fairness': [],
+            'smoothness': [],
+            'jerk': [],
+            'safety_clearance': [],
+            'time_to_goal': [],
+            'obstacle_count': 0,
+            'dynamic_obstacle_count': 0
+        }
+        
         for ep in range(args.episodes):
-            obs, _ = env.reset()
-            ep_agent_status = ['trapped'] * env.num_agents
-            actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
-            critic_hidden = [agent.critics[i].init_hidden(1, device) for i in range(env.num_agents)]
+            obs, _ = env.reset(seed=args.seed + ep * 100)
+            hidden = agent.init_hidden(batch_size=1)
             
-            done = False
+            if ep == 0:
+                scene_metrics['obstacle_count'] = len(env.obstacles)
+                scene_metrics['dynamic_obstacle_count'] = sum(1 for o in env.obstacles if o.get('is_dynamic', False))
+            
             steps = 0
-            ep_trajectories = [[] for _ in range(env.num_agents)]
+            ep_successes = 0
+            ep_collisions = 0
+            ep_smoothness = []
+            ep_jerk = []
+            ep_safety = []
             
-            while not done:
-                if args.render:
-                    env.render()
+            # For efficiency/fairness
+            start_dist = np.linalg.norm(np.array([a.state[0:3] for a in env.agents]) - np.array(env.goals), axis=1)
+            dist_traveled = np.zeros(num_agents)
+            prev_positions = np.array([a.state[0:3] for a in env.agents])
+            
+            while steps < env.max_steps:
+                obs_tensor = torch.FloatTensor(obs).unsqueeze(0).to(device)
+                with torch.no_grad():
+                    action, hidden, _ = agent.select_action(obs_tensor, hidden, explore=False)
+                action = action.squeeze(0).cpu().numpy()
                 
-                for i in range(env.num_agents):
-                    ep_trajectories[i].append(env.agents[i].state[:3].copy())
-                    
-                actions, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden, explore=False)
-                    
-                obs, rewards, terminated, truncated, info = env.step(actions)
-                
-                # Check why each agent terminated
-                for i in range(env.num_agents):
-                    if info['agent_terminated_now'][i]:
-                        # Was it success or collision?
-                        dist_to_goal = np.linalg.norm(env.agents[i].state[0:3] - env.goals[i])
-                        if dist_to_goal < env.goal_dist:
-                            ep_agent_status[i] = 'success'
-                        else:
-                            ep_agent_status[i] = 'collision'
-                            
-                done = terminated or truncated
+                next_obs, rewards, terminated, truncated, info = env.step(action)
+                obs = next_obs
                 steps += 1
                 
-            if ep < 10: # Save first 10 episodes for plotting
-                all_trajectories.append({
-                    'paths': ep_trajectories,
-                    'goals': env.goals.copy(),
-                    'obstacles': env.obstacles.copy(),
-                    'status': ep_agent_status.copy(),
-                    'successes': ep_agent_status.count('success'),
-                    'steps': steps
-                })
+                current_positions = np.array([a.state[0:3] for a in env.agents])
+                dist_traveled += np.linalg.norm(current_positions - prev_positions, axis=1)
+                prev_positions = current_positions
                 
-            if args.render:
-                env.render()
+                ep_smoothness.append(info.get('action_smoothness', 0.0))
+                ep_jerk.append(info.get('avg_jerk', 0.0))
+                ep_safety.append(info.get('safety_frontier', 0.0))
                 
-            for i in range(env.num_agents):
-                if ep_agent_status[i] == 'success':
-                    successes += 1
-                    agent_success_counts[i] += 1
-                    times_to_goal.append(steps)
-                elif ep_agent_status[i] == 'collision':
-                    collisions += 1
+                if terminated or truncated:
+                    ep_successes = sum(info.get('agent_success', np.zeros(num_agents)))
+                    ep_collisions = sum(info.get('agent_collision', np.zeros(num_agents)))
+                    break
                     
-            if info.get('success', False):
-                pass # Already recorded
-            elif info.get('collision', False):
-                pass # Already recorded
-                
-            # Collect EE Metrics
-            all_jerks.append(np.mean(env.total_jerk))
-            all_safety_frontiers.append(np.mean(env.safety_frontier))
+            scene_metrics['success'].append(1.0 if ep_successes == num_agents else 0.0)
+            scene_metrics['collision'].append(1.0 if ep_collisions > 0 else 0.0)
+            scene_metrics['trapped'].append(1.0 if (ep_successes < num_agents and ep_collisions == 0) else 0.0)
             
-            # Path Efficiency
-            for i in range(env.num_agents):
-                path_lengths.append(np.sum(np.linalg.norm(np.diff(np.array(ep_trajectories[i]), axis=0), axis=1)))
-                # Ideal distance from start to goal
-                ideal_lengths.append(np.linalg.norm(env.goals[i] - ep_trajectories[i][0]))
-                
-            print(f"Episode {ep+1}/{args.episodes} - Steps: {steps}, Success: {info.get('success', False)}, Collision: {info.get('collision', False)}")
+            # Metrics computation
+            eff = start_dist / np.maximum(dist_traveled, start_dist)
+            scene_metrics['path_efficiency'].append(np.mean(eff))
+            scene_metrics['fairness'].append(1.0 - np.std(eff))
             
-    except KeyboardInterrupt:
-        print("\nEvaluation interrupted by user! Generating plots from collected data...")
-        args.episodes = max(1, len(all_jerks)) # Avoid div by zero
-        
-    total_agents = args.episodes * env.num_agents
-    success_rate = successes / total_agents * 100
-    collision_rate = collisions / total_agents * 100
-    trapped_rate = 100 - success_rate - collision_rate
-    avg_time = np.mean(times_to_goal) if times_to_goal else 0
-    
-    # Calculate Fairness Index (Jain's Fairness Index)
-    agent_success_rates = agent_success_counts / args.episodes
-    fairness_index = (np.sum(agent_success_rates)**2) / (env.num_agents * np.sum(agent_success_rates**2) + 1e-8)
-    
-    avg_jerk = np.mean(all_jerks)
-    avg_safety = np.mean(all_safety_frontiers)
-    
-    # Path Efficiency: The ratio of the sum of the straight-line distance between the starting point and the target point of all agents to the sum of the actual trajectory lengths of all agents.
-    sum_ideal = np.sum(ideal_lengths)
-    sum_actual = np.sum(path_lengths)
-    avg_efficiency = (sum_ideal / sum_actual) if sum_actual > 0 else 0.0
-    
-    print("=== Evaluation Results ===")
-    print(f"Episodes: {args.episodes}")
-    print(f"Success Rate: {success_rate:.1f}%")
-    print(f"Collision Rate: {collision_rate:.1f}%")
-    print(f"Trapped Rate: {trapped_rate:.1f}%")
-    print(f"Avg Time to Goal: {avg_time:.1f} steps")
-    print(f"Path Efficiency: {avg_efficiency*100:.1f}%")
-    print(f"Fairness Index: {fairness_index:.3f}")
-    print(f"Avg Jerk (Smooth): {avg_jerk:.2f}")
-    print(f"Safety Frontier: {avg_safety:.2f} m")
-    
-    # --- ACADEMIC PLOTTING (Fig 4 Style) ---
-    print("\nGenerating Navigation Trajectory Plots...")
-    
-    if all_trajectories:
-        plt.figure(figsize=(12, 12))
-        plt.style.use('seaborn-v0_8-whitegrid')
-        
-        # Plot the best successful episode's trajectory
-        best_ep = 0
-        best_successes = -1
-        best_steps = 999999
-        for i, ep_data in enumerate(all_trajectories):
-            succ = ep_data.get('successes', 0)
-            steps = ep_data.get('steps', 999999)
-            if succ > best_successes or (succ == best_successes and steps < best_steps):
-                best_successes = succ
-                best_steps = steps
-                best_ep = i
+            scene_metrics['smoothness'].append(np.mean(ep_smoothness))
+            scene_metrics['jerk'].append(np.mean(ep_jerk))
+            scene_metrics['safety_clearance'].append(np.mean(ep_safety))
+            scene_metrics['time_to_goal'].append(steps)
+            
+        # Aggregate
+        all_results[scene] = {
+            'success_rate': float(np.mean(scene_metrics['success'])),
+            'collision_rate': float(np.mean(scene_metrics['collision'])),
+            'trapped_rate': float(np.mean(scene_metrics['trapped'])),
+            'path_efficiency': float(np.mean(scene_metrics['path_efficiency'])),
+            'fairness': float(np.mean(scene_metrics['fairness'])),
+            'smoothness': float(np.mean(scene_metrics['smoothness'])),
+            'jerk': float(np.mean(scene_metrics['jerk'])),
+            'safety_clearance': float(np.mean(scene_metrics['safety_clearance'])),
+            'average_time_to_goal': float(np.mean(scene_metrics['time_to_goal'])),
+            'obstacle_count': scene_metrics['obstacle_count'],
+            'dynamic_obstacle_count': scene_metrics['dynamic_obstacle_count']
+        }
+        print(f"  > Success Rate: {all_results[scene]['success_rate']*100:.1f}%, Collision Rate: {all_results[scene]['collision_rate']*100:.1f}%")
 
-        plot_ep = best_ep
-        ep_data = all_trajectories[plot_ep]
+    # Aggregate over scenes
+    successes = [res['success_rate'] for res in all_results.values()]
+    collisions = [res['collision_rate'] for res in all_results.values()]
+    
+    aggregate = {
+        'mean_success': float(np.mean(successes)),
+        'variance_success': float(np.var(successes)),
+        'mean_collision': float(np.mean(collisions)),
+        'worst_case_scene': min(all_results.keys(), key=lambda k: all_results[k]['success_rate']),
+        'generalization_score': float(np.mean(successes) * (1.0 - np.std(successes)))
+    }
+    
+    final_output = {
+        'scenes': all_results,
+        'aggregate': aggregate
+    }
+    
+    # Save JSON
+    os.makedirs(os.path.dirname(args.output_json), exist_ok=True)
+    with open(args.output_json, 'w') as f:
+        json.dump(final_output, f, indent=4)
         
-        # Plot Obstacles
-        for obs_item in ep_data['obstacles']:
-            color = obs_item.get('color', 'gray')
-            if obs_item['type'] == 'box':
-                rect = plt.Rectangle((obs_item['pos'][0]-obs_item['size'][0]/2, obs_item['pos'][1]-obs_item['size'][1]/2), 
-                                     obs_item['size'][0], obs_item['size'][1], color=color, alpha=0.4)
-                plt.gca().add_patch(rect)
-            elif obs_item['type'] == 'cylinder':
-                radius = obs_item.get('radius', 1.0)
-                if 'size' in obs_item:
-                    radius = obs_item['size'][0]/2
-                circle = plt.Circle((obs_item['pos'][0], obs_item['pos'][1]), radius, color=color, alpha=0.4)
-                plt.gca().add_patch(circle)
-            else:
-                circle = plt.Circle((obs_item['pos'][0], obs_item['pos'][1]), obs_item.get('radius', 1.5), color=color, alpha=0.4)
-                plt.gca().add_patch(circle)
-                
-        # Plot Paths
-        colors = ['#c0392b', '#2980b9', '#27ae60', '#f39c12', '#8e44ad', '#34495e', '#d35400']
-        for i in range(env.num_agents):
-            path = np.array(ep_data['paths'][i])
-            if len(path) > 0:
-                plt.plot(path[:, 0], path[:, 1], color=colors[i % len(colors)], label=f'UAV {i+1}', linewidth=2.5)
-                plt.scatter(path[0, 0], path[0, 1], color='red', marker='o', s=100, label='Start' if i==0 else "")
+    # Save CSV
+    os.makedirs(os.path.dirname(args.output_csv), exist_ok=True)
+    with open(args.output_csv, 'w', newline='') as f:
+        writer = csv.writer(f)
+        headers = ['scene', 'success_rate', 'collision_rate', 'trapped_rate', 'path_efficiency', 
+                   'fairness', 'smoothness', 'jerk', 'safety_clearance', 'average_time_to_goal', 
+                   'obstacle_count', 'dynamic_obstacle_count']
+        writer.writerow(headers)
+        for scene, res in all_results.items():
+            writer.writerow([scene] + [res[h] for h in headers[1:]])
             
-            plt.scatter(ep_data['goals'][i][0], ep_data['goals'][i][1], color='green', marker='*', s=250, label='Goal' if i==0 else "")
-            # Draw the target radius around the goal
-            goal_circle = plt.Circle((ep_data['goals'][i][0], ep_data['goals'][i][1]), env.goal_dist, color='green', alpha=0.2, linestyle='--')
-            plt.gca().add_patch(goal_circle)
-
-        plt.xlim(0, env.arena_size[0])
-        plt.ylim(0, env.arena_size[1])
-        plt.title(f'Navigation Trajectories ({args.agent.upper()}) 2D - Evaluation Episode', fontsize=16, fontweight='bold')
-        plt.xlabel('X (m)', fontsize=14)
-        plt.ylabel('Y (m)', fontsize=14)
-        plt.legend(loc='upper right')
-        plt.grid(True, linestyle=':', alpha=0.6)
-        
-        output_path = os.path.join(config['logging']['log_dir'], 'evaluation_trajectories.png')
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        plt.savefig(output_path, dpi=300)
-        print(f"Trajectory plot saved to {output_path}")
-        plt.close() # Close trajectory plot
-        
-        # 3D Plotting
-        fig = plt.figure(figsize=(12, 12))
-        ax = fig.add_subplot(111, projection='3d')
-        
-        for i in range(env.num_agents):
-            path = np.array(ep_data['paths'][i])
-            if len(path) > 0:
-                ax.plot(path[:, 0], path[:, 1], path[:, 2], color=colors[i % len(colors)], label=f'UAV {i+1}', linewidth=2.5)
-                ax.scatter(path[0, 0], path[0, 1], path[0, 2], color='red', marker='o', s=100, label='Start' if i==0 else "")
-            
-            ax.scatter(ep_data['goals'][i][0], ep_data['goals'][i][1], ep_data['goals'][i][2], color='green', marker='*', s=250, label='Goal' if i==0 else "")
-            
-        # Optional: draw basic 3d obstacles if needed
-        for obs_item in ep_data['obstacles']:
-            pos = obs_item['pos']
-            color = obs_item.get('color', 'gray')
-            if obs_item['type'] == 'box':
-                size = obs_item['size']
-                # Draw 3D Box/Pillar
-                x_, y_, z_ = pos[0]-size[0]/2, pos[1]-size[1]/2, pos[2]-size[2]/2
-                dx, dy, dz = size[0], size[1], size[2]
-                ax.bar3d(x_, y_, z_, dx, dy, dz, color=color, alpha=0.3)
-            elif obs_item['type'] == 'cylinder':
-                radius = obs_item.get('radius', 1.0)
-                height = obs_item.get('height', 10.0)
-                orig_pos = obs_item.get('orig_pos', pos)
-                z_base = orig_pos[2]
-                z_cyl = np.linspace(z_base, z_base + height, 2)
-                theta = np.linspace(0, 2*np.pi, 40)
-                theta_grid, z_grid = np.meshgrid(theta, z_cyl)
-                x_grid = radius * np.cos(theta_grid) + orig_pos[0]
-                y_grid = radius * np.sin(theta_grid) + orig_pos[1]
-                ax.plot_surface(x_grid, y_grid, z_grid, color=color, alpha=0.6, antialiased=True, shade=True)
-            else:
-                rg = obs_item.get('radius', 1.5)
-                u, v = np.mgrid[0:2*np.pi:20j, 0:np.pi:10j]
-                x = rg * np.cos(u) * np.sin(v) + pos[0]
-                y = rg * np.sin(u) * np.sin(v) + pos[1]
-                z = rg * np.cos(v) + pos[2]
-                ax.plot_surface(x, y, z, color=color, alpha=0.6, antialiased=True, shade=True)
-                
-        ax.set_xlim(0, env.arena_size[0])
-        ax.set_ylim(0, env.arena_size[1])
-        ax.set_zlim(0, env.arena_size[2])
-        ax.set_title(f'Navigation Trajectories ({args.agent.upper()}) 3D - Evaluation', fontsize=16, fontweight='bold')
-        ax.set_xlabel('X (m)')
-        ax.set_ylabel('Y (m)')
-        ax.set_zlabel('Z (m)')
-        ax.legend(loc='upper right')
-        
-        output_path_3d = os.path.join(config['logging']['log_dir'], 'evaluation_trajectories_3d.png')
-        plt.savefig(output_path_3d, dpi=300)
-        print(f"3D Trajectory plot saved to {output_path_3d}")
-        plt.close()
-    else:
-        print("No complete trajectories to plot. Skipping trajectory chart.")
-
-    # Metrics Bar Chart
-    plt.figure(figsize=(10, 6))
-    metrics = ['Success (%)', 'Collision (%)', 'Path Efficiency (%)', 'Fairness Index (*100)']
-    values = [success_rate, collision_rate, avg_efficiency * 100, fairness_index * 100]
-    colors_bar = ['#27ae60', '#c0392b', '#2980b9', '#8e44ad']
+    # Save Plot
+    fig, ax = plt.subplots(figsize=(12, 6))
+    x = np.arange(len(all_results))
+    width = 0.35
     
-    bars = plt.bar(metrics, values, color=colors_bar)
-    plt.title('Evaluation Metrics Summary', fontsize=16, fontweight='bold')
-    plt.ylim(0, 110)
-    for bar in bars:
-        yval = bar.get_height()
-        plt.text(bar.get_x() + bar.get_width()/2, yval + 2, f'{yval:.1f}', ha='center', va='bottom', fontweight='bold')
+    scene_names = list(all_results.keys())
+    ax.bar(x - width/2, [all_results[s]['success_rate']*100 for s in scene_names], width, label='Success Rate', color='#2ecc71')
+    ax.bar(x + width/2, [all_results[s]['collision_rate']*100 for s in scene_names], width, label='Collision Rate', color='#e74c3c')
     
-    metrics_path = os.path.join(config['logging']['log_dir'], 'evaluation_metrics.png')
-    plt.savefig(metrics_path, dpi=300)
-    print(f"Metrics plot saved to {metrics_path}")
+    ax.set_ylabel('Percentage (%)')
+    ax.set_title(f'Multi-Scene Evaluation ({num_agents} UAVs)')
+    ax.set_xticks(x)
+    ax.set_xticklabels([s.capitalize() for s in scene_names])
+    ax.set_ylim(0, 110)
+    ax.legend()
+    ax.grid(axis='y', linestyle='--', alpha=0.7)
     
-    plt.show()
+    os.makedirs(os.path.dirname(args.output_plot), exist_ok=True)
+    plt.savefig(args.output_plot, dpi=300)
     
-    env.close()
+    print("\n--- AGGREGATE METRICS ---")
+    print(f"Mean Success: {aggregate['mean_success']*100:.1f}%")
+    print(f"Mean Collision: {aggregate['mean_collision']*100:.1f}%")
+    print(f"Generalization Score: {aggregate['generalization_score']:.3f}")
+    print(f"Worst Case Scene: {aggregate['worst_case_scene'].capitalize()}")
+    print(f"\nResults saved to logs/")
 
 if __name__ == '__main__':
     main()

@@ -367,16 +367,16 @@ class BaseEnvironment(abc.ABC):
                 min_gap = min(min_gap, gap)
         metrics["min_obstacle_gap_m"] = round(min_gap, 3)
         if min_gap < -0.1:
-            warnings.append(f"⚠ Obstacles overlap! min gap = {min_gap:.2f} m")
+            warnings.append(f"WARNING: Obstacles overlap! min gap = {min_gap:.2f} m")
         elif min_gap < 0.8:
-            warnings.append(f"⚠ min gap {min_gap:.2f} m is very narrow (< 0.8 m)")
+            warnings.append(f"WARNING: min gap {min_gap:.2f} m is very narrow (< 0.8 m)")
 
         # Agent start/goal reachability (simple free-space check)
         for i, (ag, gl) in enumerate(zip(self.agents, self.goals)):
             if self.is_collision(ag):
-                warnings.append(f"⚠ Agent {i} spawned inside an obstacle!")
+                warnings.append(f"WARNING: Agent {i} spawned inside an obstacle!")
             if self.is_collision(gl):
-                warnings.append(f"⚠ Goal  {i} placed inside an obstacle!")
+                warnings.append(f"WARNING: Goal  {i} placed inside an obstacle!")
 
         # Coverage
         area = self.config.map_width * self.config.map_depth

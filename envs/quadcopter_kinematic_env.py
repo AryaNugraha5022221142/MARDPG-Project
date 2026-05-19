@@ -110,6 +110,17 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
                         'vel': vel, 'origin': pos.copy(), 'phase': phase, 'freq': freq
                     })
 
+    def _update_dynamic_obstacles(self):
+        for obs in self.obstacles:
+            vel = np.asarray(obs.get('vel', np.zeros(3)), dtype=float)
+            if not np.any(vel != 0):
+                continue
+
+            origin = np.asarray(obs.get('origin', obs['pos']), dtype=float)
+            phase = float(obs.get('phase', 0.0))
+            freq = float(obs.get('freq', 0.05))
+            obs['pos'] = origin + vel * np.sin(self.step_count * freq + phase)
+
     def reset(self, seed=None) -> Tuple[np.ndarray, Dict[str, Any]]:
         self.step_count = 0
         self._episode_collision = False
@@ -119,6 +130,8 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
         self.total_jerk = np.zeros(self.num_agents, dtype=np.float32)
         self.safety_frontier = np.ones(self.num_agents, dtype=np.float32) * float('inf')
         self.prev_accel = np.zeros((self.num_agents, 3), dtype=np.float32)
+        self.prev_actions = np.zeros((self.num_agents, 2), dtype=np.float32)
+        self.prev_vel = np.zeros((self.num_agents, 3), dtype=np.float32)
         
         self._generate_obstacles()
         self._update_goals()
@@ -134,6 +147,7 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
             start_yaw = rough_dir + np.random.uniform(-np.pi/4, np.pi/4)
             self.agents[i].reset(start_pos, start_yaw)
             self.prev_dist_to_goal[i] = np.linalg.norm(start_pos - self.goals[i])
+            self.prev_vel[i] = self.agents[i].state[6:9].copy()
             
         obs = self._get_observations()
         return obs, {}
@@ -214,18 +228,33 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
 
     def step(self, actions: np.ndarray) -> Tuple[np.ndarray, np.ndarray, bool, bool, Dict[str, Any]]:
         self.step_count += 1
+        self._update_dynamic_obstacles()
         
         info = {'success': False, 'collision': getattr(self, '_episode_collision', False)}
         info['agent_terminated_now'] = np.zeros(self.num_agents, dtype=bool)
         info['agent_success'] = np.zeros(self.num_agents, dtype=bool)
         info['agent_collision'] = np.zeros(self.num_agents, dtype=bool)
         
+        action_smoothness = []
+        min_distances = []
+        
         # Step 1: Apply actions and physics
         for i in range(self.num_agents):
             if self.agent_dones[i]: continue
             
             action = np.asarray(actions[i], dtype=np.float32).copy()
+            action_smoothness.append(np.mean(np.abs(action - self.prev_actions[i])))
+            self.prev_actions[i] = action.copy()
+            
+            old_vel = self.prev_vel[i].copy()
             self.agents[i].rl_step(action, M=self.M)
+            new_vel = self.agents[i].state[6:9].copy()
+            
+            accel = (new_vel - old_vel) / self.dt
+            jerk = (accel - self.prev_accel[i]) / self.dt
+            self.total_jerk[i] += np.linalg.norm(jerk) * self.dt
+            self.prev_accel[i] = accel.copy()
+            self.prev_vel[i] = new_vel.copy()
             
             # Bound inside arena
             self.agents[i].state[0] = np.clip(self.agents[i].state[0], 0.0, self.arena_size[0])
@@ -244,7 +273,11 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
             goal = self.goals[i]
             dist_to_goal = np.linalg.norm(pos - goal)
             d_min = self._get_min_distance(i)
+            min_distances.append(d_min)
             
+            if d_min < self.safety_frontier[i]:
+                self.safety_frontier[i] = d_min
+                
             old_dist_to_goal = self.prev_dist_to_goal[i]
             self.prev_dist_to_goal[i] = dist_to_goal
             
@@ -282,6 +315,11 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
         
         info['agent_success'] = np.array([self.agent_dones[i] and np.linalg.norm(self.agents[i].state[0:3] - self.goals[i]) < self.goal_dist for i in range(self.num_agents)], dtype=bool)
         info['agent_collision'] = self.agent_dones & ~info['agent_success']
+        
+        info['action_smoothness'] = float(np.mean(action_smoothness)) if action_smoothness else 0.0
+        info['avg_jerk'] = float(np.mean(self.total_jerk))
+        info['safety_frontier'] = float(np.mean(self.safety_frontier))
+        info['min_agent_dist'] = float(np.mean(min_distances)) if min_distances else 0.0
         
         terminated = bool(np.all(self.agent_dones))
         truncated = bool(self.step_count >= self.max_steps)

@@ -7,6 +7,7 @@ from .dynamic_env import DynamicObstacleEnvironment
 from .benchmark_suite import BenchmarkSuite, create_all_benchmarks
 
 from .quadcopter_kinematic_env import QuadcopterKinematicEnv
+from .quadcopter_env import QuadcopterEnv
 
 __all__ = [
     "BaseEnvironment", "EnvironmentConfig", "Obstacle", "ObstacleType",
@@ -14,5 +15,5 @@ __all__ = [
     "IrregularTerrainEnvironment", "StructuredPeriodicEnvironment",
     "StructuredObstacleEnvironment", "DynamicObstacleEnvironment",
     "BenchmarkSuite", "create_all_benchmarks",
-    "QuadcopterKinematicEnv"
+    "QuadcopterKinematicEnv", "QuadcopterEnv"
 ]

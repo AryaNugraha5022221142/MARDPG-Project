@@ -15,22 +15,24 @@ def test_actor_lstm():
     x_single = torch.randn(batch_size, obs_dim)
     hidden = actor.init_hidden(batch_size)
     
-    logits, new_hidden = actor(x_single, hidden)
+    logits, new_hidden, lstm_out = actor(x_single, hidden)
     
     assert logits.shape == (batch_size, action_dim)
     assert new_hidden[0].shape == (1, batch_size, 128)
     assert new_hidden[1].shape == (1, batch_size, 128)
+    assert lstm_out.shape == (batch_size, 1, 128)
     
     # Test sequence input
     x_seq = torch.randn(batch_size, seq_len, obs_dim)
     hidden_seq = actor.init_hidden(batch_size)
     
-    logits_seq, new_hidden_seq = actor(x_seq, hidden_seq)
+    logits_seq, new_hidden_seq, lstm_out_seq = actor(x_seq, hidden_seq)
     
     # The current implementation returns (batch_size, seq_len, action_dim) for sequences
     # Or (batch_size, action_dim) if it only processes single steps.
     # We just ensure it runs without error for now.
     assert logits_seq is not None
+    assert lstm_out_seq.shape == (batch_size, seq_len, 128)
 
 def test_critic():
     batch_size = 4

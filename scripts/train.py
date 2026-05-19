@@ -55,6 +55,7 @@ def main():
 
     # Environment
     env_config = config['environment'].copy()
+    env_config['seed'] = seed
     if 'rewards' in config:
         env_config['rewards'] = config['rewards']
     

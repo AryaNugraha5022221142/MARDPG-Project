@@ -56,6 +56,11 @@ environment:
   obs_dim: 30
   reward_type: "baseline"
   rate_limit_per_step: 1.0
+  randomize_layouts: true
+
+evaluation:
+  scenes: ["urban", "forest", "terrain", "structured", "dynamic"]
+  level: 3
 
 logging:
   log_dir: "logs"
