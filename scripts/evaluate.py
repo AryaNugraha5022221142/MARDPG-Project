@@ -51,20 +51,14 @@ def main():
                 scenes = args.scenes.split(',')
 
     obs_dim = 30
-    agent_config = {
-        'actor_lr': config['learning']['actor_lr'],
-        'critic_lr': config['learning']['critic_lr'],
-        'gamma': config['learning']['gamma'],
-        'hidden_dim': config['network']['actor']['hidden_dim'],
-        'lstm_layers': config['network']['actor']['lstm_layers'],
-        'obs_dim': obs_dim,
-        'action_dim': 2,
-        'num_agents': num_agents,
-        'max_grad_norm': config['learning']['max_grad_norm'],
-        'device': device
-    }
+    agent = MARDPG_Baseline(
+        obs_dim=obs_dim, 
+        action_dim=2, 
+        num_agents=num_agents,
+        config=config, 
+        device=device
+    )
     
-    agent = MARDPG_Baseline(agent_config)
     try:
         agent.load(args.checkpoint, robust=True)
     except Exception as e:
