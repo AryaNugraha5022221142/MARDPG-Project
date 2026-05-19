@@ -9,13 +9,13 @@ import matplotlib.pyplot as plt
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from envs import QuadcopterKinematicEnv
-from agents import MARDPG, MARDPG_Gaussian
+from agents import MARDPG_Baseline
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='config/config.yaml')
     parser.add_argument('--checkpoint', type=str, required=True, help='Path to agent checkpoint')
-    parser.add_argument('--agent', type=str, default='mardpg', choices=['mardpg', 'iddpg', 'mardpg_g'])
+    parser.add_argument('--agent', type=str, default='mardpg_baseline', choices=['mardpg_baseline'])
     parser.add_argument('--episodes', type=int, default=50, help='Episodes per level')
     parser.add_argument('--levels', type=int, default=4, help='Number of curriculum levels to evaluate (e.g., 4 means levels 0,1,2,3)')
     args = parser.parse_args()
@@ -35,10 +35,8 @@ def main():
     obs_dim = config['environment'].get('obs_dim', 34)
     
     # Initialize Agent
-    if args.agent in ['mardpg', 'iddpg']:
-        agent = MARDPG(obs_dim=obs_dim, action_dim=2, num_agents=env.num_agents, config=config, device=device, independent_critics=(args.agent == 'iddpg'))
-    elif args.agent == 'mardpg_g':
-        agent = MARDPG_Gaussian(obs_dim=obs_dim, action_dim=2, num_agents=env.num_agents, config=config, device=device, independent_critics=False)
+    if args.agent == 'mardpg_baseline':
+        agent = MARDPG_Baseline(obs_dim=obs_dim, action_dim=2, num_agents=env.num_agents, config=config, device=device, independent_critics=False)
     else:
         raise ValueError(f"Unknown agent type {args.agent}")
         
@@ -61,18 +59,14 @@ def main():
         
         for ep in range(args.episodes):
             obs, _ = env.reset()
-            if args.agent in ['mardpg', 'iddpg', 'mardpg_g']:
-                actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
-                critic_hidden = [agent.critics[i].init_hidden(1, device) for i in range(env.num_agents)]
+            actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
+            critic_hidden = [agent.critics[i].init_hidden(1, device) for i in range(env.num_agents)]
             
             done = False
             steps = 0
             
             while not done:
-                if args.agent in ['mardpg', 'iddpg', 'mardpg_g']:
-                    actions, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden, explore=False)
-                else:
-                    actions = agent.select_actions(obs, explore=False)
+                actions, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden, explore=False)
                     
                 obs, rewards, terminated, truncated, info = env.step(actions)
                 done = terminated or truncated

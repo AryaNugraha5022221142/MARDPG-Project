@@ -17,20 +17,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from envs import QuadcopterKinematicEnv
 from envs.benchmark_wrapped_env import BenchmarkWrappedEnv
 from envs.base_env import DifficultyLevel
-from agents import MARDPG, MARDPG_Gaussian
+from agents import MARDPG_Baseline
 
 def _make_agent(agent_type, obs_dim, action_dim, num_agents, config, device):
-    if agent_type in ['mardpg', 'iddpg']:
-        from agents import MARDPG
-        return MARDPG(obs_dim=obs_dim, action_dim=action_dim, num_agents=num_agents,
-                      config=config, device=device,
-                      independent_critics=(agent_type == 'iddpg'))
-    elif agent_type == 'mardpg_g':
-        from agents import MARDPG_Gaussian
-        return MARDPG_Gaussian(obs_dim=obs_dim, action_dim=action_dim, num_agents=num_agents,
-                               config=config, device=device, independent_critics=False)
-    elif agent_type == 'mardpg_baseline':
-        from agents import MARDPG_Baseline
+    if agent_type == 'mardpg_baseline':
         return MARDPG_Baseline(obs_dim=obs_dim, action_dim=action_dim, num_agents=num_agents,
                                config=config, device=device, independent_critics=False)
     else:
@@ -38,9 +28,9 @@ def _make_agent(agent_type, obs_dim, action_dim, num_agents, config, device):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', type=str, default='config/config_baseline.yaml', help='Path to config file')
-    parser.add_argument('--run-name', type=str, default='mardpg_run', help='Name of the run')
-    parser.add_argument('--agent', type=str, default='mardpg_baseline', choices=['mardpg', 'iddpg', 'mardpg_g', 'mardpg_baseline'], help='Agent type to train')
+    parser.add_argument('--config', type=str, default='config/config.yaml', help='Path to config file')
+    parser.add_argument('--run-name', type=str, default='mardpg_baseline_run', help='Name of the run')
+    parser.add_argument('--agent', type=str, default='mardpg_baseline', choices=['mardpg_baseline'], help='Agent type to train')
     parser.add_argument('--scenario', type=str, default=None, help='Scenario name (e.g., urban_canyon, search_and_rescue)')
     parser.add_argument('--num-episodes', type=int, default=None, help='Number of episodes to train')
     parser.add_argument('--seed', type=int, default=None, help='Random seed')
@@ -253,9 +243,8 @@ def main():
             if obs.shape[1] != obs_dim:
                 raise ValueError(f"Observation dim mismatch: env returned {obs.shape[1]}, agent expects {obs_dim}")
             
-            if args.agent in ['mardpg', 'iddpg', 'mardpg_g', 'mardpg_baseline']:
-                actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
-                critic_hidden = [agent.critics[i].init_hidden(1, device) for i in range(env.num_agents)]
+            actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
+            critic_hidden = [agent.critics[i].init_hidden(1, device) for i in range(env.num_agents)]
             
             episode_reward = 0
             done = False
@@ -281,15 +270,12 @@ def main():
                 if args.render:
                     env.render()
                     
-                if args.agent in ['mardpg', 'iddpg', 'mardpg_g', 'mardpg_baseline']:
-                    actions, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden)
-                    
-                    # Compute mean hidden state norm (h part of lstm hidden state)
-                    # actor_hidden is list of (h, c) for each agent. h is (batch_size, hidden_dim)
-                    h_norms = [torch.norm(h_state[0]).item() for h_state in actor_hidden]
-                    episode_h_norms.append(np.mean(h_norms))
-                else:
-                    actions = agent.select_actions(obs)
+                actions, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden)
+                
+                # Compute mean hidden state norm (h part of lstm hidden state)
+                # actor_hidden is list of (h, c) for each agent. h is (batch_size, hidden_dim)
+                h_norms = [torch.norm(h_state[0]).item() for h_state in actor_hidden]
+                episode_h_norms.append(np.mean(h_norms))
                     
                 episode_act_stds.append(np.std(actions))
                     
@@ -317,10 +303,7 @@ def main():
                 done = terminated or truncated
                 global_step_count += 1
                 
-                if args.agent in ['mardpg', 'iddpg', 'mardpg_g', 'mardpg_baseline']:
-                    agent.memory.push(obs, np.array(actions), rewards, next_obs, dones, done)
-                else:
-                    agent.memory.push(obs, np.array(actions), rewards, next_obs, dones)
+                agent.memory.push(obs, np.array(actions), rewards, next_obs, dones, done)
                 
                 # Only update if we have enough episodes in the buffer
                 if len(agent.memory) >= config['memory'].get('batch_size', 32) and global_step_count % config.get('update_interval', 10) == 0:
@@ -360,7 +343,7 @@ def main():
             length_history.append(episode_length)
             collision_history.append(agent_col_rate)
             
-            hidden_state_norm_history.append(np.mean(episode_h_norms) if hasattr(agent, 'actor') and args.agent in ['mardpg', 'iddpg', 'mardpg_g'] else np.nan)
+            hidden_state_norm_history.append(np.mean(episode_h_norms) if hasattr(agent, 'actor') else np.nan)
             tracking_error_history.append(np.mean(episode_tracking_errors))
             action_smoothness_history.append(np.mean(episode_action_smoothness))
             min_agent_dist_history.append(np.mean(episode_min_agent_distances))

@@ -13,16 +13,16 @@ RESULTS_DIR = 'results/phase1'
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 def run_phase1():
-    print(f"=== Phase 1: Baseline Verification (MARDPG on {SCENARIO}) ===")
+    print(f"=== Phase 1: Baseline Verification (MARDPG_Baseline on {SCENARIO}) ===")
     results = []
     
     for seed in SEEDS:
-        output_file = f"{RESULTS_DIR}/mardpg_seed{seed}.json"
+        output_file = f"{RESULTS_DIR}/mardpg_baseline_seed{seed}.json"
         print(f"\n--- Training Seed {seed} ---")
         
         cmd = [
             'python', 'scripts/train.py',
-            '--agent', 'mardpg',
+            '--agent', 'mardpg_baseline',
             '--scenario', SCENARIO,
             '--num-episodes', str(EPISODES),
             '--seed', str(seed),

@@ -1,16 +1,16 @@
 training:
   num_episodes: 10000
-  num_agents: 10
+  num_agents: 5
   seed: 42
   device: "cuda"
 
 network:
   actor:
-    hidden_dim: 256
+    hidden_dim: 128
     lstm_layers: 1
     dropout: 0.0
   critic:
-    hidden_dim: 256
+    hidden_dim: 128
     lstm_layers: 1
 
 learning:
@@ -21,39 +21,41 @@ learning:
 
 memory:
   buffer_size: 500
-  batch_size: 32
-  seq_len: 64
+  batch_size: 128
+  seq_len: 80
 
-update_interval: 50
+update_interval: 100
 
 targets:
   update_rate: 0.01
 
+# FIX 5d: Annealed Gaussian exploration noise parameters (see AnnealedGaussianNoise).
+# sigma_start=0.3 covers ~57% of the ±π/6 action range for early exploration.
+# total_steps = 10000 episodes × ~500 avg steps = 5M.
+exploration:
+  sigma_start: 0.3
+  sigma_end: 0.05
+  total_steps: 5000000
+
+# FIX 1d: terminal bonuses now used by kinematic env baseline reward path
 rewards:
-  weights:
-    transfer: 3.0
-    collision: 10.0
-    smoothness: 0.01
-    step_penalty: 0.05
-    free_space: 0.0
-    tracking: 0.3        # Velocity tracking penalty weight
   goal_bonus: 0.0
   collision_penalty: 0.0
 
 environment:
   action_bound: 0.5235987756
   arena_size: [100, 100, 60]
-  num_obstacles: 0
+  num_obstacles: 25
   max_velocity: 5.0
   rangefinder_max_range: 10.0
   collision_distance: 0.8
   goal_distance: 2.0
   dt: 0.01
-  dynamic_ratio: 0.0       # CHANGED: disable dynamic obstacles until system is stable
+  dynamic_ratio: 0.0
   max_steps: 2000
-  obs_dim: 30              # Updated to match paper (25 rangefinder + 5 goal)
+  obs_dim: 30
   reward_type: "baseline"
-  rate_limit_per_step: 1.0  # CHANGED: increased from 0.5
+  rate_limit_per_step: 1.0
 
 logging:
   log_dir: "logs"

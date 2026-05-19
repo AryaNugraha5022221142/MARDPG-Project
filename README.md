@@ -12,7 +12,7 @@ The goal of this project is to train multiple UAVs (quadcopters) to navigate fro
 
 ## 🛠 Features
 
-- **MARDPG Algorithm**: A state-of-the-art MARL algorithm using centralized training and decentralized execution with LSTM-based recurrent networks.
+- **MARDPG_Baseline Algorithm**: A state-of-the-art MARL algorithm using centralized training and decentralized execution with LSTM-based recurrent networks.
 - **Complex 3D Environment**: A custom environment built with realistic quadcopter dynamics and varied obstacle shapes (spheres and boxes).
 - **Dynamic Obstacles**: Real-time moving threats to test the agents' predictive capabilities.
 - **3D Visualization**: Real-time rendering using Matplotlib for monitoring agent behavior.
@@ -64,7 +64,7 @@ python scripts/train.py --config config/config.yaml --run-name my_first_test
 ### 3. Evaluation
 To test a trained model:
 ```bash
-python scripts/evaluate.py --config config/config.yaml --checkpoint checkpoints/mardpg_final.pt --render
+python scripts/evaluate.py --config config/config.yaml --checkpoint checkpoints/mardpg_baseline_final.pt --render
 ```
 
 ## 🌍 Environment Scenarios
@@ -78,8 +78,8 @@ You can test the algorithms in different scenarios by using the `--scenario` fla
 - `forest`: **Under-canopy** - Dense trunks (brown) and branches (green) requiring precise navigation.
 
 ## 🏗️ Environment Structure
-- **State Space (34D)**: 25 rangefinder rays (5x5 grid) + 5D relative goal info + 3D normalized velocity + 1D saturation indicator.
-- **Action Space (4D Continuous)**: Pitch, Roll, Throttle, Yaw rate commands processed internally.
+- **State Space (30D)**: 25 rangefinder rays (5x5 grid) + 5D relative goal info + angles.
+- **Action Space (2D Continuous)**: Pitch proxy, Yaw proxy.
 - **Dynamics**: Simplified 3D quadcopter physics with inertia and drag.
 
 ## ☁️ Google Colab Workflow
@@ -93,7 +93,7 @@ For heavy training, use Google Colab to leverage free GPU resources:
 
 ## 📂 Project Structure
 
-- `agents/`: MARDPG implementation and Neural Network architectures.
+- `agents/`: MARDPG_Baseline implementation and Neural Network architectures.
 - `envs/`: Quadcopter dynamics and 3D environment logic.
 - `config/`: Hyperparameter settings and environment configurations.
 - `scripts/`: Entry points for training, evaluation, and analysis.

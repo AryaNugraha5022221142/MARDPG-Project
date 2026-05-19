@@ -4,8 +4,8 @@ import os
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from envs.quadcopter_env import QuadcopterEnv
-from agents.mardpg import MARDPG
+from envs.quadcopter_kinematic_env import QuadcopterKinematicEnv
+from agents import MARDPG_Baseline
 
 def main():
     parser = argparse.ArgumentParser()
@@ -18,8 +18,8 @@ def main():
         config = yaml.safe_load(f)
 
     device = torch.device("cpu")
-    obs_dim = config['environment'].get('obs_dim', 34)
-    agent = MARDPG(obs_dim=obs_dim, action_dim=4, num_agents=config['training']['num_agents'], config=config, device=device)
+    obs_dim = 30
+    agent = MARDPG_Baseline(obs_dim=obs_dim, action_dim=2, num_agents=config['training']['num_agents'], config=config, device=device)
     agent.load(args.model_path)
     
     noise_levels = [0.0, 0.05, 0.1, 0.2, 0.5]
@@ -29,7 +29,7 @@ def main():
     for noise in noise_levels:
         env_config = config['environment'].copy()
         env_config['sensor_noise_std'] = noise
-        env = QuadcopterEnv(num_agents=config['training']['num_agents'], config=env_config)
+        env = QuadcopterKinematicEnv(num_agents=config['training']['num_agents'], config=env_config)
         
         noise_successes = []
         for ep in range(args.num_episodes):
@@ -39,7 +39,7 @@ def main():
             
             done = False
             while not done:
-                actions, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden)
+                actions, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden, explore=False)
                 next_obs, rewards, terminated, truncated, info = env.step(actions)
                 obs = next_obs
                 done = terminated or truncated

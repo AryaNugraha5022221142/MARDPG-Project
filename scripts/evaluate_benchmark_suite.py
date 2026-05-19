@@ -12,13 +12,13 @@ from envs.base_env import EnvironmentConfig, DifficultyLevel
 from envs.benchmark_suite import BenchmarkSuite
 from envs.quadcopter_kinematic_env import QuadcopterKinematicEnv
 from envs.benchmark_wrapped_env import BenchmarkWrappedEnv
-from agents import MARDPG, MARDPG_Gaussian
+from agents import MARDPG_Baseline
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='config/config.yaml')
     parser.add_argument('--checkpoint', type=str, required=True)
-    parser.add_argument('--agent', type=str, default='mardpg', choices=['mardpg', 'iddpg', 'mardpg_g', 'mardpg_baseline'])
+    parser.add_argument('--agent', type=str, default='mardpg_baseline', choices=['mardpg_baseline'])
     parser.add_argument('--episodes', type=int, default=10, help='Episodes per benchmark scene')
     parser.add_argument('--num_agents', type=int, default=10, help='Number of UAVs')
     parser.add_argument('--level', type=int, default=3, help='Difficulty level (1-5), 3=MEDIUM')
@@ -74,12 +74,7 @@ def main():
     config['training']['num_agents'] = num_agents
     
     # Initialize the agent appropriately
-    if args.agent in ['mardpg', 'iddpg']:
-        agent = MARDPG(obs_dim=obs_dim, action_dim=2, num_agents=num_agents, config=config, device=device, independent_critics=(args.agent == 'iddpg'))
-    elif args.agent == 'mardpg_g':
-        agent = MARDPG_Gaussian(obs_dim=obs_dim, action_dim=2, num_agents=num_agents, config=config, device=device, independent_critics=False)
-    elif args.agent == 'mardpg_baseline':
-        from agents import MARDPG_Baseline
+    if args.agent == 'mardpg_baseline':
         agent = MARDPG_Baseline(obs_dim=obs_dim, action_dim=2, num_agents=num_agents, config=config, device=device, independent_critics=False)
         
     # We must handle loading weights properly when testing on 10 UAVs from a 3 UAV checkpoint
@@ -130,18 +125,14 @@ def main():
         for ep in range(args.episodes):
             obs, _ = env.reset()
             # Reset hidden states
-            if args.agent in ['mardpg', 'iddpg', 'mardpg_g', 'mardpg_baseline']:
-                actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(num_agents)]
-                critic_hidden = [agent.critics[0].init_hidden(1, device) for _ in range(num_agents)] # Critic doesn't matter for eval
+            actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(num_agents)]
+            critic_hidden = [agent.critics[0].init_hidden(1, device) for _ in range(num_agents)] # Critic doesn't matter for eval
             
             done = False
             steps = 0
             
             while not done:
-                if args.agent in ['mardpg', 'iddpg', 'mardpg_g', 'mardpg_baseline']:
-                    actions, actor_hidden, _ = agent.select_actions(obs, actor_hidden, critic_hidden, explore=False)
-                else:
-                    actions = agent.select_actions(obs, explore=False)
+                actions, actor_hidden, _ = agent.select_actions(obs, actor_hidden, critic_hidden, explore=False)
                     
                 obs, rewards, terminated, truncated, info = env.step(actions)
                 done = terminated or truncated
