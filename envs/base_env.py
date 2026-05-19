@@ -440,7 +440,7 @@ class BaseEnvironment(abc.ABC):
         positions = []
 
         def valid_pos(p):
-            if self.is_collision(p): return False
+            if self.is_collision(p, margin=1.0): return False
             for prev_p in positions:
                 if np.linalg.norm(p - prev_p) < (cfg.agent_radius * 2 + 1.0):
                     return False

@@ -213,8 +213,8 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
             
             goal_dist = np.linalg.norm(goal - pos) / self.arena_diagonal
             dx, dy, dz = goal - pos
-            goal_h_angle = np.arctan2(dy, dx) - yaw        # relative to heading
-            goal_v_angle = np.arctan2(dz, np.sqrt(dx**2+dy**2)) - pitch
+            goal_h_angle = (np.arctan2(dy, dx) - yaw + np.pi) % (2*np.pi) - np.pi
+            goal_v_angle = (np.arctan2(dz, np.sqrt(dx**2+dy**2)) - pitch + np.pi) % (2*np.pi) - np.pi
             
             # [ [ϕ, ϑ], 25 rangefinders, target ξ ]
             obs = np.concatenate([

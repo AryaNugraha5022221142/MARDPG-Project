@@ -135,6 +135,7 @@ def main():
                 if terminated or truncated:
                     ep_successes = sum(info.get('agent_success', np.zeros(num_agents)))
                     ep_collisions = sum(info.get('agent_collision', np.zeros(num_agents)))
+                    print(f"  [Debug] Episode {ep} ended at step {steps}. Successes={ep_successes}, Collisions={ep_collisions}")
                     break
                     
             scene_metrics['success'].append(1.0 if ep_successes == num_agents else 0.0)
