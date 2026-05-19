@@ -98,7 +98,8 @@ def main():
         
         for ep in range(args.episodes):
             obs, _ = env.reset(seed=args.seed + ep * 100)
-            hidden = agent.init_hidden(batch_size=1)
+            actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
+            critic_hidden = [agent.critics[i].init_hidden(1, device) for i in range(env.num_agents)]
             
             if ep == 0:
                 scene_metrics['obstacle_count'] = len(env.obstacles)
@@ -117,10 +118,7 @@ def main():
             prev_positions = np.array([a.state[0:3] for a in env.agents])
             
             while steps < env.max_steps:
-                obs_tensor = torch.FloatTensor(obs).unsqueeze(0).to(device)
-                with torch.no_grad():
-                    action, hidden, _ = agent.select_action(obs_tensor, hidden, explore=False)
-                action = action.squeeze(0).cpu().numpy()
+                action, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden, explore=False)
                 
                 next_obs, rewards, terminated, truncated, info = env.step(action)
                 obs = next_obs
