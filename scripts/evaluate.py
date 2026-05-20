@@ -143,7 +143,11 @@ def main():
                 if terminated or truncated:
                     ep_successes = int(np.sum(info.get('agent_success', np.zeros(num_agents, dtype=bool))))
                     ep_collisions = int(np.sum(info.get('agent_collision', np.zeros(num_agents, dtype=bool))))
-                    print(f"  [Debug] Episode {ep} ended at step {steps}. Successes={ep_successes}, Collisions={ep_collisions}")
+                    ep_any_collision = ep_collisions > 0
+                    ep_success = (ep_successes == num_agents and not ep_any_collision)
+                    
+                    out_str = f"Ep {ep+1}/{args.episodes} | Steps: {steps} | Success: {ep_success} | Collision: {ep_any_collision}"
+                    print(f"{out_str:<80}", end='\r')
                     break
                     
             ep_any_collision = ep_collisions > 0
@@ -185,6 +189,10 @@ def main():
                 plt.close(fig_traj)
 
         # Aggregate
+        sr = float(np.mean(scene_metrics['success'])) * 100
+        cr = float(np.mean(scene_metrics['collision'])) * 100
+        at = float(np.mean(scene_metrics['time_to_goal']))
+        
         all_results[scene] = {
             'success_rate': float(np.mean(scene_metrics['success'])),
             'collision_rate': float(np.mean(scene_metrics['collision'])),
@@ -194,11 +202,15 @@ def main():
             'smoothness': float(np.mean(scene_metrics['smoothness'])),
             'jerk': float(np.mean(scene_metrics['jerk'])),
             'safety_clearance': float(np.mean(scene_metrics['safety_clearance'])),
-            'average_time_to_goal': float(np.mean(scene_metrics['time_to_goal'])),
+            'average_time_to_goal': at,
             'obstacle_count': scene_metrics['obstacle_count'],
             'dynamic_obstacle_count': scene_metrics['dynamic_obstacle_count']
         }
-        print(f"  > Success Rate: {all_results[scene]['success_rate']*100:.1f}%, Collision Rate: {all_results[scene]['collision_rate']*100:.1f}%")
+        print(f"\n\nResults for {scene}:\n" + "-"*30)
+        print(f"Success Rate:   {sr:.1f}%")
+        print(f"Collision Rate: {cr:.1f}%")
+        print(f"Avg Time:       {at:.1f} steps")
+        print("-" * 30 + "\n")
 
     # Aggregate over scenes
     successes = [res['success_rate'] for res in all_results.values()]
