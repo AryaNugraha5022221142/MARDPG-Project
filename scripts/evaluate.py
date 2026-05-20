@@ -16,61 +16,6 @@ from agents import MARDPG_Baseline
 
 BENCHMARK_SCENES = tuple(BenchmarkSuite.REGISTRY.keys())
 
-def evaluate_legacy(args, config, env_config, agent, device, num_agents):
-    print(f"\nEvaluating scene: {args.scenario}")
-    env = QuadcopterKinematicEnv(
-        num_agents=num_agents, 
-        config=env_config,
-        render_mode=None,
-        scenario=args.scenario
-    )
-
-    successes = 0
-    collisions = 0
-    times_to_goal = []
-
-    for ep in range(args.episodes):
-        obs, _ = env.reset(seed=args.seed + ep * 100)
-        actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
-        critic_hidden = [agent.critics[i].init_hidden(1, device) for i in range(env.num_agents)]
-        
-        done = False
-        steps = 0
-        ep_success = False
-        ep_collision = False
-        
-        while steps < env.max_steps:
-            action, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden, explore=False)
-            obs, rewards, terminated, truncated, info = env.step(action)
-            steps += 1
-            
-            if terminated or truncated:
-                # Based on legacy logic, agent_success might be array or boolean
-                if sum(info.get('agent_success', np.zeros(num_agents))) == num_agents:
-                    ep_success = True
-                if sum(info.get('agent_collision', np.zeros(num_agents))) > 0:
-                    ep_collision = True
-                break
-
-        if ep_success:
-            successes += 1
-            times_to_goal.append(steps)
-        if ep_collision:
-            collisions += 1
-
-        out_str = f"Ep {ep+1}/{args.episodes} | Steps: {steps} | Success: {ep_success} | Collision: {ep_collision}"
-        print(f"{out_str:<80}", end='\r')
-
-    sr = (successes / args.episodes) * 100
-    cr = (collisions / args.episodes) * 100
-    at = np.mean(times_to_goal) if times_to_goal else 0
-
-    print(f"\n\nResults for {args.scenario}:\n" + "-"*30)
-    print(f"Success Rate:   {sr:.1f}%")
-    print(f"Collision Rate: {cr:.1f}%")
-    print(f"Avg Time:       {at:.1f} steps")
-    print("-" * 30 + "\n")
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='config/config.yaml')
@@ -88,14 +33,8 @@ def main():
     parser.add_argument('--output-plot', type=str, default='logs/multi_scene_evaluation_metrics.png')
     args = parser.parse_args()
 
-    # Determine execution mode
-    mode = 'benchmark'
-    if args.scenario is not None or args.legacy_random_env:
-        mode = 'legacy'
-
-    # Set default episodes based on mode
     if args.episodes is None:
-        args.episodes = 250 if mode == 'legacy' else 10
+        args.episodes = 250
 
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
@@ -117,14 +56,18 @@ def main():
     env_config = config['environment'].copy()
     env_config['seed'] = args.seed
 
-    if mode == 'legacy':
-        return evaluate_legacy(args, config, env_config, agent, device, num_agents)
-
-    # Benchmark mode logic
-    if args.scenes.lower() == 'all':
+    if args.scenario is not None:
+        scenes = [args.scenario]
+    elif args.legacy_random_env:
+        scenes = ['legacy']
+    elif args.scenes.lower() == 'all':
         scenes = list(BENCHMARK_SCENES)
     else:
         scenes = args.scenes.split(',')
+
+    all_results = {}
+
+    for scene in scenes:
 
         print(f"\nEvaluating scene: {scene}")
         if scene == 'legacy':
@@ -176,6 +119,10 @@ def main():
             dist_traveled = np.zeros(num_agents)
             prev_positions = np.array([a.state[0:3] for a in env.agents])
             
+            ep_positions = []
+            if ep == 0:
+                ep_positions.append(prev_positions.copy())
+
             while steps < env.max_steps:
                 action, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden, explore=False)
                 
@@ -186,6 +133,8 @@ def main():
                 current_positions = np.array([a.state[0:3] for a in env.agents])
                 dist_traveled += np.linalg.norm(current_positions - prev_positions, axis=1)
                 prev_positions = current_positions
+                if ep == 0:
+                    ep_positions.append(current_positions.copy())
                 
                 ep_smoothness.append(info.get('action_smoothness', 0.0))
                 ep_jerk.append(info.get('avg_jerk', 0.0))
@@ -212,6 +161,29 @@ def main():
             scene_metrics['safety_clearance'].append(np.mean(ep_safety))
             scene_metrics['time_to_goal'].append(steps)
             
+            if ep == 0:
+                fig_traj = plt.figure(figsize=(10, 8))
+                ax_traj = fig_traj.add_subplot(111, projection='3d')
+                ep_positions_arr = np.array(ep_positions)  # shape (T, num_agents, 3)
+                for i in range(num_agents):
+                    ax_traj.plot(ep_positions_arr[:, i, 0], ep_positions_arr[:, i, 1], ep_positions_arr[:, i, 2], label=f'Agent {i}')
+                    ax_traj.scatter(ep_positions_arr[0, i, 0], ep_positions_arr[0, i, 1], ep_positions_arr[0, i, 2], color='green', marker='o')
+                    ax_traj.scatter(ep_positions_arr[-1, i, 0], ep_positions_arr[-1, i, 1], ep_positions_arr[-1, i, 2], color='blue', marker='x')
+                
+                # Goal points
+                goals = np.array(env.goals)
+                for i in range(num_agents):
+                    ax_traj.scatter(goals[i, 0], goals[i, 1], goals[i, 2], color='red', marker='*')
+
+                ax_traj.set_title(f'3D Trajectory - Scene: {scene}')
+                ax_traj.set_xlabel('X')
+                ax_traj.set_ylabel('Y')
+                ax_traj.set_zlabel('Z')
+                plt.legend()
+                os.makedirs('logs', exist_ok=True)
+                plt.savefig(f'logs/{scene}_trajectory_ep0.png')
+                plt.close(fig_traj)
+
         # Aggregate
         all_results[scene] = {
             'success_rate': float(np.mean(scene_metrics['success'])),
