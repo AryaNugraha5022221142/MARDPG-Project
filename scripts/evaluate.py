@@ -16,22 +16,86 @@ from agents import MARDPG_Baseline
 
 BENCHMARK_SCENES = tuple(BenchmarkSuite.REGISTRY.keys())
 
+def evaluate_legacy(args, config, env_config, agent, device, num_agents):
+    print(f"\nEvaluating scene: {args.scenario}")
+    env = QuadcopterKinematicEnv(
+        num_agents=num_agents, 
+        config=env_config,
+        render_mode=None,
+        scenario=args.scenario
+    )
+
+    successes = 0
+    collisions = 0
+    times_to_goal = []
+
+    for ep in range(args.episodes):
+        obs, _ = env.reset(seed=args.seed + ep * 100)
+        actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
+        critic_hidden = [agent.critics[i].init_hidden(1, device) for i in range(env.num_agents)]
+        
+        done = False
+        steps = 0
+        ep_success = False
+        ep_collision = False
+        
+        while steps < env.max_steps:
+            action, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden, explore=False)
+            obs, rewards, terminated, truncated, info = env.step(action)
+            steps += 1
+            
+            if terminated or truncated:
+                # Based on legacy logic, agent_success might be array or boolean
+                if sum(info.get('agent_success', np.zeros(num_agents))) == num_agents:
+                    ep_success = True
+                if sum(info.get('agent_collision', np.zeros(num_agents))) > 0:
+                    ep_collision = True
+                break
+
+        if ep_success:
+            successes += 1
+            times_to_goal.append(steps)
+        if ep_collision:
+            collisions += 1
+
+        out_str = f"Ep {ep+1}/{args.episodes} | Steps: {steps} | Success: {ep_success} | Collision: {ep_collision}"
+        print(f"{out_str:<80}", end='\r')
+
+    sr = (successes / args.episodes) * 100
+    cr = (collisions / args.episodes) * 100
+    at = np.mean(times_to_goal) if times_to_goal else 0
+
+    print(f"\n\nResults for {args.scenario}:\n" + "-"*30)
+    print(f"Success Rate:   {sr:.1f}%")
+    print(f"Collision Rate: {cr:.1f}%")
+    print(f"Avg Time:       {at:.1f} steps")
+    print("-" * 30 + "\n")
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='config/config.yaml')
     parser.add_argument('--checkpoint', type=str, required=True)
     parser.add_argument('--agent', type=str, default='mardpg_baseline', choices=['mardpg_baseline'])
-    parser.add_argument('--scenes', type=str, default='all', help='Comma separated scenes or "all"')
-    parser.add_argument('--scenario', type=str, default=None, help='Specific scenario name')
-    parser.add_argument('--legacy-random-env', action='store_true')
+    parser.add_argument('--scenes', type=str, default='all', help='Comma separated scenes or "all" (for benchmark envs)')
+    parser.add_argument('--scenario', type=str, default=None, help='Legacy: Specific scenario name (e.g. forest, pillars)')
+    parser.add_argument('--legacy-random-env', action='store_true', help='Use legacy random environment')
     parser.add_argument('--num-agents', type=int, default=None)
     parser.add_argument('--level', type=int, default=3)
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--episodes', type=int, default=10)
+    parser.add_argument('--episodes', type=int, default=None, help='Default: 250 for legacy, 10 for benchmark')
     parser.add_argument('--output-json', type=str, default='logs/multi_scene_evaluation_results.json')
     parser.add_argument('--output-csv', type=str, default='logs/multi_scene_evaluation_results.csv')
     parser.add_argument('--output-plot', type=str, default='logs/multi_scene_evaluation_metrics.png')
     args = parser.parse_args()
+
+    # Determine execution mode
+    mode = 'benchmark'
+    if args.scenario is not None or args.legacy_random_env:
+        mode = 'legacy'
+
+    # Set default episodes based on mode
+    if args.episodes is None:
+        args.episodes = 250 if mode == 'legacy' else 10
 
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
@@ -39,17 +103,6 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() and config['training'].get('device') == 'cuda' else "cpu")
     num_agents = args.num_agents if args.num_agents is not None else config['training'].get('num_agents', 5)
     
-    if args.legacy_random_env:
-        scenes = ['legacy']
-    else:
-        if args.scenario:
-            scenes = [args.scenario]
-        else:
-            if args.scenes.lower() == 'all':
-                scenes = list(BENCHMARK_SCENES)
-            else:
-                scenes = args.scenes.split(',')
-
     obs_dim = 30
     agent = MARDPG_Baseline(
         obs_dim=obs_dim, 
@@ -63,10 +116,16 @@ def main():
 
     env_config = config['environment'].copy()
     env_config['seed'] = args.seed
-    
-    all_results = {}
-    
-    for scene in scenes:
+
+    if mode == 'legacy':
+        return evaluate_legacy(args, config, env_config, agent, device, num_agents)
+
+    # Benchmark mode logic
+    if args.scenes.lower() == 'all':
+        scenes = list(BENCHMARK_SCENES)
+    else:
+        scenes = args.scenes.split(',')
+
         print(f"\nEvaluating scene: {scene}")
         if scene == 'legacy':
             env = QuadcopterKinematicEnv(
