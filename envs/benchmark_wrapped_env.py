@@ -17,8 +17,13 @@ class BenchmarkWrappedEnv(QuadcopterKinematicEnv):
             self.difficulty = level
         else:
             self.difficulty = DifficultyLevel(level)
-            
+        
+        # Override bypass so _generate_obstacles doesn't crash on init
+        self._init_done = False
+        self.set_curriculum_level(self.difficulty.value)
         self.b_cfg = self._make_benchmark_config(self.benchmark_name, self.base_seed)
+        self._init_done = True
+        self._generate_obstacles()
         
     def _make_benchmark_config(self, benchmark_name, seed):
         train_w = float(self.arena_size[0])
@@ -54,7 +59,13 @@ class BenchmarkWrappedEnv(QuadcopterKinematicEnv):
             'is_dynamic': bool(obstacle.is_dynamic),
         }
         
+    def set_curriculum_level(self, level: int):
+        super().set_curriculum_level(level)
+        if getattr(self, '_init_done', False):
+            self.b_cfg = self._make_benchmark_config(self.benchmark_name, self.base_seed)
+
     def _generate_obstacles(self):
+        if not getattr(self, '_init_done', False): return
         self.b_env = BenchmarkSuite.make(self.benchmark_name, self.b_cfg)
         
         self.obstacles = []
