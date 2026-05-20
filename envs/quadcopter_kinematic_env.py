@@ -211,7 +211,9 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
             ranges_norm = ranges / self.max_range
             ranges_norm = np.clip(ranges_norm, 0.0, 1.0)
             
-            goal_dist = np.linalg.norm(goal - pos) / self.arena_diagonal
+            # Using constant diagonal normalization equivalent to what it trained on (e.g. 100x100x40 ~ 147m)
+            # This prevents spatial observation drift when arena volume is expanded dynamically
+            goal_dist = np.linalg.norm(goal - pos) / 147.0
             dx, dy, dz = goal - pos
             goal_h_angle = (np.arctan2(dy, dx) - yaw + np.pi) % (2*np.pi) - np.pi
             goal_v_angle = (np.arctan2(dz, np.sqrt(dx**2+dy**2)) - pitch + np.pi) % (2*np.pi) - np.pi
