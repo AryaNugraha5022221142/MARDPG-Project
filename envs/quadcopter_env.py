@@ -23,8 +23,11 @@ class QuadcopterEnv:
                 config = scenario_config
             else:
                 # Merge scenario specific keys into config
-                for k, v in scenario_config.items():
-                    config[k] = v
+                if scenario_config is not None:
+                    _protected_keys = {'rangefinder_max_range', 'arena_size'}
+                    for k, v in scenario_config.items():
+                        if k not in _protected_keys:
+                            config[k] = v
             
         if config is None:
             config = {

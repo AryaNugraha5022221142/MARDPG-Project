@@ -192,14 +192,15 @@ def main():
                 ep_safety.append(info.get('safety_frontier', 0.0))
                 
                 if terminated or truncated:
-                    ep_successes = sum(info.get('agent_success', np.zeros(num_agents)))
-                    ep_collisions = sum(info.get('agent_collision', np.zeros(num_agents)))
+                    ep_successes = int(np.sum(info.get('agent_success', np.zeros(num_agents, dtype=bool))))
+                    ep_collisions = int(np.sum(info.get('agent_collision', np.zeros(num_agents, dtype=bool))))
                     print(f"  [Debug] Episode {ep} ended at step {steps}. Successes={ep_successes}, Collisions={ep_collisions}")
                     break
                     
-            scene_metrics['success'].append(1.0 if ep_successes == num_agents else 0.0)
-            scene_metrics['collision'].append(1.0 if ep_collisions > 0 else 0.0)
-            scene_metrics['trapped'].append(1.0 if (ep_successes < num_agents and ep_collisions == 0) else 0.0)
+            ep_any_collision = ep_collisions > 0
+            scene_metrics['success'].append(1.0 if (ep_successes == num_agents and not ep_any_collision) else 0.0)
+            scene_metrics['collision'].append(1.0 if ep_any_collision else 0.0)
+            scene_metrics['trapped'].append(1.0 if (ep_successes == 0 and not ep_any_collision) else 0.0)
             
             # Metrics computation
             eff = start_dist / np.maximum(dist_traveled, start_dist)

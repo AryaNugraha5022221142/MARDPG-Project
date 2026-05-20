@@ -454,7 +454,11 @@ class BaseEnvironment(abc.ABC):
                 np.array([cfg.map_width - margin, cfg.map_depth - margin, 1.5]),
             ]
             for i in range(n):
-                c = corners[i % len(corners)]
+                if i < len(corners):
+                    c = corners[i].copy()
+                else:
+                    p = self._free_position_2d(margin)
+                    c = p if p is not None else corners[i % len(corners)].copy()
                 if not valid_pos(c):
                     # Try to find a free space nearby
                     found = False

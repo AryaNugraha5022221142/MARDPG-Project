@@ -6,8 +6,7 @@ from envs.quadcopter_kinematic_env import QuadcopterKinematicEnv
 class BenchmarkWrappedEnv(QuadcopterKinematicEnv):
     def __init__(self, benchmark_name, level, num_agents, config):
         config_override = config.copy()
-        config_override['arena_size'] = [60.0, 60.0, 20.0] 
-        super().__init__(num_agents=num_agents, config=config_override, render_mode=None, scenario=benchmark_name)
+        super().__init__(num_agents=num_agents, config=config_override, render_mode=None, scenario=None)
         
         self.benchmark_name = benchmark_name
         self.base_seed = int(config.get('seed', 42))
@@ -20,13 +19,15 @@ class BenchmarkWrappedEnv(QuadcopterKinematicEnv):
             self.difficulty = DifficultyLevel(level)
             
         self.b_cfg = self._make_benchmark_config(self.benchmark_name, self.base_seed)
-        self.arena_size = np.array([self.b_cfg.map_width, self.b_cfg.map_depth, self.b_cfg.map_height])
         
     def _make_benchmark_config(self, benchmark_name, seed):
+        train_w = float(self.arena_size[0])
+        train_d = float(self.arena_size[1])
+        train_h = float(self.arena_size[2])
         return EnvironmentConfig(
-            map_width=60.0,
-            map_depth=60.0,
-            map_height=20.0,
+            map_width=train_w,
+            map_depth=train_d,
+            map_height=train_h,
             difficulty=self.difficulty,
             name=f"{benchmark_name}_{self.difficulty.name}",
             n_agents=self.num_agents,
