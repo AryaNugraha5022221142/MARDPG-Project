@@ -162,8 +162,6 @@ class QuadcopterEnv:
         Level 2: 75x75x30, 15 obstacles, 10% dynamic
         Level 3: 100x100x40, 25 obstacles, 20% dynamic
         Level 4: 130x130x50, 35 obstacles, 25% dynamic
-        Level 5: 160x160x60, 50 obstacles, 30% dynamic
-        Level 6: 160x160x60, 65 obstacles, 40% dynamic
         """
         if level == 0:
             self.arena_size = np.array([30, 30, 15], dtype=np.float32)
@@ -181,18 +179,10 @@ class QuadcopterEnv:
             self.arena_size = np.array([100, 100, 40], dtype=np.float32)
             self.num_obstacles = 25
             self.dynamic_ratio = 0.2
-        elif level == 4:
+        else:
             self.arena_size = np.array([130, 130, 50], dtype=np.float32)
             self.num_obstacles = 35
             self.dynamic_ratio = 0.25
-        elif level == 5:
-            self.arena_size = np.array([160, 160, 60], dtype=np.float32)
-            self.num_obstacles = 50
-            self.dynamic_ratio = 0.3
-        else:
-            self.arena_size = np.array([160, 160, 60], dtype=np.float32)
-            self.num_obstacles = 65
-            self.dynamic_ratio = 0.4
             
         self.arena_diagonal = float(np.linalg.norm(self.arena_size))
         print(f"[DEBUG] quadcopter_env initialized with arena_size: {self.arena_size}, scenario: {self.scenario}")

@@ -25,16 +25,13 @@ def main():
     parser.add_argument('--scenario', type=str, default=None, help='Legacy: Specific scenario name (e.g. forest, pillars)')
     parser.add_argument('--legacy-random-env', action='store_true', help='Use legacy random environment')
     parser.add_argument('--num-agents', type=int, default=None)
-    parser.add_argument('--level', type=int, default=3)
+    parser.add_argument('--level', type=str, default='1,2,3,4,5', help='Comma separated levels or single level (e.g., 1,2,3,4,5)')
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--episodes', type=int, default=None, help='Default: 250 for legacy, 10 for benchmark')
+    parser.add_argument('--episodes', type=int, default=250, help='Episodes per scene/level')
     parser.add_argument('--output-json', type=str, default='logs/multi_scene_evaluation_results.json')
     parser.add_argument('--output-csv', type=str, default='logs/multi_scene_evaluation_results.csv')
     parser.add_argument('--output-plot', type=str, default='logs/multi_scene_evaluation_metrics.png')
     args = parser.parse_args()
-
-    if args.episodes is None:
-        args.episodes = 250
 
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
@@ -64,152 +61,161 @@ def main():
         scenes = list(BENCHMARK_SCENES)
     else:
         scenes = args.scenes.split(',')
+        
+    levels = [int(l.strip()) for l in str(args.level).split(',')]
 
     all_results = {}
 
     for scene in scenes:
-
-        print(f"\nEvaluating scene: {scene}")
-        if scene == 'legacy':
-            env = QuadcopterKinematicEnv(
-                num_agents=num_agents, 
-                config=env_config,
-                render_mode=None
-            )
-        else:
-            env = BenchmarkWrappedEnv(
-                benchmark_name=scene,
-                level=args.level,
-                num_agents=num_agents,
-                config=env_config
-            )
+        for level in levels:
+            key = f"{scene}_L{level}"
+            if scene == 'legacy':
+                key = "legacy"
+            print(f"\nEvaluating scene: {scene} (Level {level})")
             
-        scene_metrics = {
-            'success': [],
-            'collision': [],
-            'trapped': [],
-            'path_efficiency': [],
-            'fairness': [],
-            'smoothness': [],
-            'jerk': [],
-            'safety_clearance': [],
-            'time_to_goal': [],
-            'obstacle_count': 0,
-            'dynamic_obstacle_count': 0
-        }
-        
-        for ep in range(args.episodes):
-            obs, _ = env.reset(seed=args.seed + ep * 100)
-            actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
-            critic_hidden = [agent.critics[i].init_hidden(1, device) for i in range(env.num_agents)]
-            
-            if ep == 0:
-                scene_metrics['obstacle_count'] = len(env.obstacles)
-                scene_metrics['dynamic_obstacle_count'] = sum(1 for o in env.obstacles if o.get('is_dynamic', False))
-            
-            steps = 0
-            ep_successes = 0
-            ep_collisions = 0
-            ep_smoothness = []
-            ep_jerk = []
-            ep_safety = []
-            
-            # For efficiency/fairness
-            start_dist = np.linalg.norm(np.array([a.state[0:3] for a in env.agents]) - np.array(env.goals), axis=1)
-            dist_traveled = np.zeros(num_agents)
-            prev_positions = np.array([a.state[0:3] for a in env.agents])
-            
-            ep_positions = []
-            if ep == 0:
-                ep_positions.append(prev_positions.copy())
-
-            while steps < env.max_steps:
-                action, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden, explore=False)
+            if scene == 'legacy':
+                env = QuadcopterKinematicEnv(
+                    num_agents=num_agents, 
+                    config=env_config,
+                    render_mode=None
+                )
+            else:
+                env = BenchmarkWrappedEnv(
+                    benchmark_name=scene,
+                    level=level,
+                    num_agents=num_agents,
+                    config=env_config
+                )
                 
-                next_obs, rewards, terminated, truncated, info = env.step(action)
-                obs = next_obs
-                steps += 1
+            scene_metrics = {
+                'success': [],
+                'collision': [],
+                'trapped': [],
+                'path_efficiency': [],
+                'fairness': [],
+                'smoothness': [],
+                'jerk': [],
+                'safety_clearance': [],
+                'time_to_goal': [],
+                'obstacle_count': 0,
+                'dynamic_obstacle_count': 0
+            }
+            
+            for ep in range(args.episodes):
+                obs, _ = env.reset(seed=args.seed + ep * 100)
+                actor_hidden = [agent.actor.init_hidden(1, device) for _ in range(env.num_agents)]
+                critic_hidden = [agent.critics[i].init_hidden(1, device) for i in range(env.num_agents)]
                 
-                current_positions = np.array([a.state[0:3] for a in env.agents])
-                dist_traveled += np.linalg.norm(current_positions - prev_positions, axis=1)
-                prev_positions = current_positions
                 if ep == 0:
-                    ep_positions.append(current_positions.copy())
+                    scene_metrics['obstacle_count'] = len(env.obstacles)
+                    scene_metrics['dynamic_obstacle_count'] = sum(1 for o in env.obstacles if o.get('is_dynamic', False))
+            
+                steps = 0
+                ep_successes = 0
+                ep_collisions = 0
+                ep_smoothness = []
+                ep_jerk = []
+                ep_safety = []
                 
-                ep_smoothness.append(info.get('action_smoothness', 0.0))
-                ep_jerk.append(info.get('avg_jerk', 0.0))
-                ep_safety.append(info.get('safety_frontier', 0.0))
+                # For efficiency/fairness
+                start_dist = np.linalg.norm(np.array([a.state[0:3] for a in env.agents]) - np.array(env.goals), axis=1)
+                dist_traveled = np.zeros(num_agents)
+                prev_positions = np.array([a.state[0:3] for a in env.agents])
                 
-                if terminated or truncated:
-                    ep_successes = int(np.sum(info.get('agent_success', np.zeros(num_agents, dtype=bool))))
-                    ep_collisions = int(np.sum(info.get('agent_collision', np.zeros(num_agents, dtype=bool))))
-                    ep_any_collision = ep_collisions > 0
-                    ep_success = (ep_successes == num_agents and not ep_any_collision)
+                ep_positions = []
+                if ep == 0:
+                    ep_positions.append(prev_positions.copy())
+    
+                while steps < env.max_steps:
+                    action, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden, explore=False)
                     
-                    out_str = f"Ep {ep+1}/{args.episodes} | Steps: {steps} | Success: {ep_success} | Collision: {ep_any_collision}"
-                    print(f"{out_str:<80}", end='\r')
-                    break
+                    next_obs, rewards, terminated, truncated, info = env.step(action)
+                    obs = next_obs
+                    steps += 1
                     
-            ep_any_collision = ep_collisions > 0
-            scene_metrics['success'].append(1.0 if (ep_successes == num_agents and not ep_any_collision) else 0.0)
-            scene_metrics['collision'].append(1.0 if ep_any_collision else 0.0)
-            scene_metrics['trapped'].append(1.0 if (ep_successes == 0 and not ep_any_collision) else 0.0)
-            
-            # Metrics computation
-            eff = start_dist / np.maximum(dist_traveled, start_dist)
-            scene_metrics['path_efficiency'].append(np.mean(eff))
-            scene_metrics['fairness'].append(1.0 - np.std(eff))
-            
-            scene_metrics['smoothness'].append(np.mean(ep_smoothness))
-            scene_metrics['jerk'].append(np.mean(ep_jerk))
-            scene_metrics['safety_clearance'].append(np.mean(ep_safety))
-            scene_metrics['time_to_goal'].append(steps)
-            
-            if ep == 0:
-                fig_traj = plt.figure(figsize=(10, 8))
-                ax_traj = fig_traj.add_subplot(111, projection='3d')
-                ep_positions_arr = np.array(ep_positions)  # shape (T, num_agents, 3)
-                for i in range(num_agents):
-                    ax_traj.plot(ep_positions_arr[:, i, 0], ep_positions_arr[:, i, 1], ep_positions_arr[:, i, 2], label=f'Agent {i}')
-                    ax_traj.scatter(ep_positions_arr[0, i, 0], ep_positions_arr[0, i, 1], ep_positions_arr[0, i, 2], color='green', marker='o')
-                    ax_traj.scatter(ep_positions_arr[-1, i, 0], ep_positions_arr[-1, i, 1], ep_positions_arr[-1, i, 2], color='blue', marker='x')
+                    current_positions = np.array([a.state[0:3] for a in env.agents])
+                    dist_traveled += np.linalg.norm(current_positions - prev_positions, axis=1)
+                    prev_positions = current_positions
+                    if ep == 0:
+                        ep_positions.append(current_positions.copy())
+                    
+                    ep_smoothness.append(info.get('action_smoothness', 0.0))
+                    ep_jerk.append(info.get('avg_jerk', 0.0))
+                    ep_safety.append(info.get('safety_frontier', 0.0))
+                    
+                    if terminated or truncated:
+                        ep_successes = int(np.sum(info.get('agent_success', np.zeros(num_agents, dtype=bool))))
+                        ep_collisions = int(np.sum(info.get('agent_collision', np.zeros(num_agents, dtype=bool))))
+                        ep_any_collision = ep_collisions > 0
+                        ep_success = (ep_successes == num_agents and not ep_any_collision)
+                        
+                        out_str = f"Ep {ep+1}/{args.episodes} | Steps: {steps} | Success: {ep_success} | Collision: {ep_any_collision}"
+                        print(f"{out_str:<80}", end='\r')
+                        break
+                        
+                ep_any_collision = ep_collisions > 0
+                scene_metrics['success'].append(1.0 if (ep_successes == num_agents and not ep_any_collision) else 0.0)
+                scene_metrics['collision'].append(1.0 if ep_any_collision else 0.0)
+                scene_metrics['trapped'].append(1.0 if (ep_successes == 0 and not ep_any_collision) else 0.0)
                 
-                # Goal points
-                goals = np.array(env.goals)
-                for i in range(num_agents):
-                    ax_traj.scatter(goals[i, 0], goals[i, 1], goals[i, 2], color='red', marker='*')
-
-                ax_traj.set_title(f'3D Trajectory - Scene: {scene}')
-                ax_traj.set_xlabel('X')
-                ax_traj.set_ylabel('Y')
-                ax_traj.set_zlabel('Z')
-                plt.legend()
-                os.makedirs('logs', exist_ok=True)
-                plt.savefig(f'logs/{scene}_trajectory_ep0.png')
-                plt.close(fig_traj)
+                # Metrics computation
+                eff = start_dist / np.maximum(dist_traveled, start_dist)
+                scene_metrics['path_efficiency'].append(np.mean(eff))
+                scene_metrics['fairness'].append(1.0 - np.std(eff))
+                
+                scene_metrics['smoothness'].append(np.mean(ep_smoothness))
+                scene_metrics['jerk'].append(np.mean(ep_jerk))
+                scene_metrics['safety_clearance'].append(np.mean(ep_safety))
+                scene_metrics['time_to_goal'].append(steps)
+                
+                if ep == 0:
+                    fig_traj = plt.figure(figsize=(10, 8))
+                    ax_traj = fig_traj.add_subplot(111, projection='3d')
+                    ep_positions_arr = np.array(ep_positions)  # shape (T, num_agents, 3)
+                    for i in range(num_agents):
+                        ax_traj.plot(ep_positions_arr[:, i, 0], ep_positions_arr[:, i, 1], ep_positions_arr[:, i, 2], label=f'Agent {i}')
+                        ax_traj.scatter(ep_positions_arr[0, i, 0], ep_positions_arr[0, i, 1], ep_positions_arr[0, i, 2], color='green', marker='o')
+                        ax_traj.scatter(ep_positions_arr[-1, i, 0], ep_positions_arr[-1, i, 1], ep_positions_arr[-1, i, 2], color='blue', marker='x')
+                    
+                    # Goal points
+                    goals = np.array(env.goals)
+                    for i in range(num_agents):
+                        ax_traj.scatter(goals[i, 0], goals[i, 1], goals[i, 2], color='red', marker='*')
+    
+                    ax_traj.set_title(f'3D Trajectory - Benchmark: {key}')
+                    ax_traj.set_xlabel('X')
+                    ax_traj.set_ylabel('Y')
+                    ax_traj.set_zlabel('Z')
+                    plt.legend()
+                    os.makedirs('logs', exist_ok=True)
+                    plt.savefig(f'logs/{key}_trajectory_ep0.png')
+                    plt.close(fig_traj)
 
         # Aggregate
         sr = float(np.mean(scene_metrics['success'])) * 100
         cr = float(np.mean(scene_metrics['collision'])) * 100
         at = float(np.mean(scene_metrics['time_to_goal']))
         
-        all_results[scene] = {
-            'success_rate': float(np.mean(scene_metrics['success'])),
-            'collision_rate': float(np.mean(scene_metrics['collision'])),
-            'trapped_rate': float(np.mean(scene_metrics['trapped'])),
-            'path_efficiency': float(np.mean(scene_metrics['path_efficiency'])),
-            'fairness': float(np.mean(scene_metrics['fairness'])),
-            'smoothness': float(np.mean(scene_metrics['smoothness'])),
-            'jerk': float(np.mean(scene_metrics['jerk'])),
-            'safety_clearance': float(np.mean(scene_metrics['safety_clearance'])),
-            'average_time_to_goal': at,
-            'obstacle_count': scene_metrics['obstacle_count'],
-            'dynamic_obstacle_count': scene_metrics['dynamic_obstacle_count']
+        all_results[key] = {
+        'success_rate': float(np.mean(scene_metrics['success'])),
+        'collision_rate': float(np.mean(scene_metrics['collision'])),
+        'trapped_rate': float(np.mean(scene_metrics['trapped'])),
+        'path_efficiency': float(np.mean(scene_metrics['path_efficiency'])),
+        'fairness': float(np.mean(scene_metrics['fairness'])),
+        'smoothness': float(np.mean(scene_metrics['smoothness'])),
+        'jerk': float(np.mean(scene_metrics['jerk'])),
+        'safety_clearance': float(np.mean(scene_metrics['safety_clearance'])),
+        'average_time_to_goal': at,
+        'obstacle_count': scene_metrics['obstacle_count'],
+        'dynamic_obstacle_count': scene_metrics['dynamic_obstacle_count']
         }
-        print(f"\n\nResults for {scene}:\n" + "-"*30)
-        print(f"Success Rate:   {sr:.1f}%")
-        print(f"Collision Rate: {cr:.1f}%")
-        print(f"Avg Time:       {at:.1f} steps")
+        print(f"\n\nResults for {key}:\n" + "-"*30)
+        print(f"Success Rate:    {all_results[key]['success_rate']*100:.1f}%")
+        print(f"Collision Rate:  {all_results[key]['collision_rate']*100:.1f}%")
+        print(f"Trapped Rate:    {all_results[key]['trapped_rate']*100:.1f}%")
+        print(f"Path Efficiency: {all_results[key]['path_efficiency']:.3f}")
+        print(f"Fairness Index:  {all_results[key]['fairness']:.3f}")
+        print(f"Avg Time:        {all_results[key]['average_time_to_goal']:.1f} steps")
         print("-" * 30 + "\n")
 
     # Aggregate over scenes
