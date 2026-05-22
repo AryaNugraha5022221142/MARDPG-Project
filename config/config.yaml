@@ -62,6 +62,11 @@ evaluation:
   scenes: ["urban", "forest", "terrain", "structured", "dynamic"]
   level: 3
 
+obs_structure:
+  angles: [0, 2]        # 2 dims: [pitch, yaw]
+  ranges: [2, 27]       # 25 dims: rangefinder
+  goal: [27, 30]        # 3 dims: [dist, h_angle, v_angle]
+
 logging:
   log_dir: "logs"
   checkpoint_dir: "checkpoints"

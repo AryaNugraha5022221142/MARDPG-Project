@@ -53,43 +53,59 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() and config['training'].get('device') == 'cuda' else "cpu")
     print(f"Using device: {device}")
 
-    # Environment
-    env_config = config['environment'].copy()
-    env_config['seed'] = seed
-    if 'rewards' in config:
-        env_config['rewards'] = config['rewards']
-    
-    if args.scenario:
-        from envs.scenarios import get_scenario_config
-        scenario_config = get_scenario_config(args.scenario)
-        env_config.update(scenario_config)
-    
-    env_config['agent_id_dim'] = config['training']['num_agents']
-    env_config['sensor_noise_std'] = args.sensor_noise
-    env_config['reward_type'] = args.reward_type
-
-    env_level = config['environment'].get('level', 3)
-    
-    if args.scenario is None or args.scenario in ["urban", "forest", "terrain", "structured", "dynamic"]:
-        scenario_name = args.scenario if args.scenario else "urban"
-        env = BenchmarkWrappedEnv(
-            benchmark_name=scenario_name,
-            level=env_level,
-            num_agents=config['training']['num_agents'], 
-            config=env_config
-        )
-        if args.render:
+    def create_env(num_agents, scenario, config, render_mode, seed):
+        """Single factory function for environment creation."""
+        env_config = config['environment'].copy()
+        env_config['seed'] = seed
+        env_config['sensor_noise_std'] = config.get('sensor_noise_std', 0.02)
+        env_config['reward_type'] = config.get('reward_type', 'baseline')
+        if 'rewards' in config:
+            env_config['rewards'] = config['rewards']
+            
+        if scenario:
+            from envs.scenarios import get_scenario_config
+            scenario_config = get_scenario_config(scenario)
+            env_config.update(scenario_config)
+            
+        env_config['agent_id_dim'] = num_agents
+        
+        env_level = config['environment'].get('level', 3)
+        
+        if scenario is None or scenario in ["urban", "forest", "terrain", "structured", "dynamic"]:
+            scenario_name = scenario if scenario else "urban"
+            env = BenchmarkWrappedEnv(
+                benchmark_name=scenario_name,
+                level=env_level,
+                num_agents=num_agents,
+                config=env_config
+            )
+        else:
+            env = QuadcopterKinematicEnv(
+                num_agents=num_agents,
+                config=env_config,
+                render_mode='human' if render_mode else None,
+                scenario=scenario
+            )
+        
+        if render_mode and hasattr(env, 'render_mode'):
             env.render_mode = 'human'
-    else:
-        env = QuadcopterKinematicEnv(
-            num_agents=config['training']['num_agents'], 
-            config=env_config,
-            render_mode='human' if args.render else None,
-            scenario=args.scenario
-        )
+        
+        return env
+
+    current_num_agents = config['training']['num_agents']
+    
+    # Environment
+    env = create_env(
+        num_agents=current_num_agents,
+        scenario=args.scenario,
+        config=config,
+        render_mode=args.render,
+        seed=seed
+    )
 
     # Agent
     obs_dim = env.obs_dim
+    action_dim = getattr(env, 'action_dim', 2)
 
     # Logging
     use_wandb = config['logging'].get('use_wandb', False)
@@ -118,7 +134,7 @@ def main():
     recent_trapped = deque(maxlen=100)
     recent_path_eff = deque(maxlen=100)
     
-    current_num_agents = config['training']['num_agents']
+    agent = _make_agent(args.agent, obs_dim, action_dim, current_num_agents, config, device)
     
     def set_lr_scale(agent, scale):
         actor_lr = config['learning'].get('actor_lr', 1e-4) * scale
@@ -132,24 +148,6 @@ def main():
                     pg['lr'] = critic_lr
 
     warmup_until = config['training'].get('warmup_episodes', 100)
-
-    # Re-create env and agent with starting agents
-    env_config_start = env_config.copy()
-    if args.scenario is None or args.scenario in ["urban", "forest", "terrain", "structured", "dynamic"]:
-        scenario_name = args.scenario if args.scenario else "urban"
-        env = BenchmarkWrappedEnv(
-            benchmark_name=scenario_name,
-            level=env_level,
-            num_agents=current_num_agents, 
-            config=env_config_start
-        )
-        if args.render:
-            env.render_mode = 'human'
-    else:
-        env = QuadcopterKinematicEnv(num_agents=current_num_agents, config=env_config_start,
-                            render_mode='human' if args.render else None,
-                            scenario=args.scenario)
-    agent = _make_agent(args.agent, obs_dim, 2, current_num_agents, config, device)
     
     # Academic Data Tracking
     reward_history = []
@@ -182,9 +180,10 @@ def main():
             latest_ep = -1
             if checkpoints:
                 def extract_ep(f):
+                    basename = os.path.basename(f)
                     try:
-                        return int(f.split('_ep')[-1].split('.pt')[0])
-                    except:
+                        return int(basename.split('_ep')[-1].split('.pt')[0])
+                    except (ValueError, IndexError):
                         return -1
                 checkpoints.sort(key=extract_ep)
                 latest_path = checkpoints[-1]

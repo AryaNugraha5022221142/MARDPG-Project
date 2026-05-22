@@ -28,7 +28,6 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
     def set_scene_type(self, scene: str):
         """Randomly selects from the four obstacle types per episode."""
         self.scenario = scene
-        self._generate_obstacles()
 
     def _generate_obstacles(self):
         """Generates random spherical, box, cylinder and irregular obstacles."""
