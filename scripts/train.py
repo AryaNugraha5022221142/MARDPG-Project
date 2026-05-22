@@ -126,16 +126,12 @@ def main():
         if hasattr(agent, 'actor_optimizer'):
             for pg in agent.actor_optimizer.param_groups:
                 pg['lr'] = actor_lr
-        if hasattr(agent, 'critic_optimizer'):
-            for pg in agent.critic_optimizer.param_groups:
-                pg['lr'] = critic_lr
-        elif hasattr(agent, 'critic_optimizers_1'):
-            for opt in agent.critic_optimizers_1:
-                for pg in opt.param_groups: pg['lr'] = critic_lr
-            for opt in agent.critic_optimizers_2:
-                for pg in opt.param_groups: pg['lr'] = critic_lr
+        if hasattr(agent, 'critic_optimizers'):
+            for opt in agent.critic_optimizers:
+                for pg in opt.param_groups:
+                    pg['lr'] = critic_lr
 
-    warmup_until = 0
+    warmup_until = config['training'].get('warmup_episodes', 100)
 
     # Re-create env and agent with starting agents
     env_config_start = env_config.copy()
@@ -229,10 +225,12 @@ def main():
     pbar = tqdm(range(start_episode, num_episodes + 1), desc="Training", initial=start_episode - 1, total=num_episodes)
     try:
         for episode in pbar:
-            if episode == warmup_until:
+            if episode <= warmup_until:
+                # Linear warmup from 0.3 to 1.0
+                scale = 0.3 + 0.7 * (episode / warmup_until)
+                set_lr_scale(agent, scale)
+            else:
                 set_lr_scale(agent, 1.0)
-            elif episode < warmup_until:
-                set_lr_scale(agent, 0.3)
 
             # FIX 2e: rotate scene type each episode to match paper's multi-environment
             # training (Section VI-A).  Only applied when no explicit --scenario is given.
