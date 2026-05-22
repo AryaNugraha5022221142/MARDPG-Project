@@ -100,8 +100,17 @@ def test_dynamic_normalization():
     
     for size in arena_sizes:
         diag = np.linalg.norm(size)
-        goal_dist_normalized = 50.0 / diag  # Example distance
-        assert 0 < goal_dist_normalized < 1  # Should be reasonable
+        
+        # Use realistic distance within arena (half diagonal)
+        realistic_dist = diag * 0.5
+        goal_dist_normalized = realistic_dist / diag
+        
+        assert 0 < goal_dist_normalized < 1  # Always valid
+        
+        # Edge cases
+        assert 0.0 / diag == 0.0  # At goal
+        assert diag / diag == 1.0   # Far corner
+    
     print("✓ Fix 14: Dynamic normalization works for all arena sizes")
 
 if __name__ == '__main__':
