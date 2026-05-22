@@ -6,7 +6,9 @@ from typing import Tuple
 
 class ActorLSTM(nn.Module):
     """
-    LSTM-based Actor network shared across all agents.
+    [LEGACY] LSTM-based Actor network shared across all agents.
+    Warning: This is a dead class not used by MARDPG_Baseline, 
+    kept only for backward compatibility in tests.
     Outputs continuous actions in [-action_limit, action_limit].
     Implements a shared base network (Conv2d + State FC) with per-agent LSTM and output heads.
     """
@@ -83,7 +85,8 @@ class ActorLSTM(nn.Module):
 
 class CriticLSTM(nn.Module):
     """
-    Centralized Critic network (MARDPG style).
+    [LEGACY] Centralized Critic network (MARDPG style).
+    Warning: This is a dead class not used by MARDPG_Baseline.
     Takes joint observations and joint actions directly.
     """
     def __init__(self, obs_dim: int = 34, action_dim: int = 4, num_agents: int = 3, hidden_dim: int = 128, num_layers: int = 1, independent: bool = False, critic_hidden_dim: int = 128):
