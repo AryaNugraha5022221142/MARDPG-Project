@@ -27,7 +27,8 @@ def generate_scene():
     
     # Initialize environment with human render mode to create plot objects
     print("Initializing environment...")
-    env = QuadcopterKinematicEnv(num_agents=3, config=config, render_mode="human")
+    env_config = config.get('environment', config)
+    env = QuadcopterKinematicEnv(num_agents=3, config=env_config, render_mode="human")
     
     # Reset environment to get a new random configuration
     print("Generating a random scene...")
