@@ -170,7 +170,7 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
             state = self.agents[i].state
             pos = state[0:3]
             pitch = state[4]
-            yaw = state[5]
+            yaw = state[5] + np.random.normal(0, getattr(self, 'yaw_noise_std', 0.0))
             
             goal = self.goals[i]
             
@@ -208,6 +208,7 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
                 ranges = np.minimum(ranges, np.min(t_hits, axis=1))
             
             ranges_norm = ranges / self.max_range
+            ranges_norm = ranges_norm + np.random.normal(0, getattr(self, 'sensor_noise_std', 0.0), 25)
             ranges_norm = np.clip(ranges_norm, 0.0, 1.0)
             
             # Using dynamic diagonal normalization to prevent spatial observation drift
