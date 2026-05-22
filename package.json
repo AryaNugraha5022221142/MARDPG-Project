@@ -4,9 +4,10 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "python3 -m http.server 3000",
-    "build": "mkdir -p dist && echo 'Done' > dist/index.html",
+    "build": "python3 -c \"import urllib.request; urllib.request.urlretrieve('https://bootstrap.pypa.io/get-pip.py', 'get-pip.py')\" && python3 get-pip.py --user && ~/.local/bin/pip install --user -r requirements.txt && mkdir -p dist && python3 scripts/visualize_env.py",
     "clean": "rm -rf dist",
     "verify": "python3 scripts/verify_pretraining.py",
+    "visualize": "python3 scripts/visualize_env.py",
     "train": "python3 scripts/train.py --num-episodes 500"
   }
 }

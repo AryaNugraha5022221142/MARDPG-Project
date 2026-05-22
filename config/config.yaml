@@ -1,8 +1,9 @@
 training:
-  num_episodes: 10000
+  num_episodes: 15000
   num_agents: 3
   seed: 42
   device: "cuda"
+  warmup_episodes: 200
 
 network:
   actor:
@@ -20,7 +21,7 @@ learning:
   max_grad_norm: 1.0
 
 memory:
-  buffer_size: 2000
+  buffer_size: 3000
   batch_size: 64
   seq_len: 80
 
@@ -32,11 +33,11 @@ targets:
 exploration:
   sigma_start: 0.3
   sigma_end: 0.05
-  total_steps: 5000000
+  total_steps: 7000000
 
 rewards:
-  goal_bonus: 0.0
-  collision_penalty: 0.0
+  goal_bonus: 200.0
+  collision_penalty: -50.0
 
 environment:
   action_bound: 0.5235987756
@@ -69,9 +70,9 @@ curriculum:
   enabled: true
   schedule:
     0: 3
-    500: 5
-    1500: 7
-    3000: 10
+    750: 5
+    2250: 7
+    4500: 10
   reset_buffer: true
   transfer_weights: true
 

@@ -1,14 +1,18 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Workspace</title>
+    <title>Quadcopter Environment Scene</title>
     <style>
-        body { font-family: monospace; padding: 2rem; }
+        body { font-family: monospace; padding: 2rem; background: #fafafa; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .scene-image { width: 100%; border: 1px solid #ccc; border-radius: 4px; margin-top: 15px; }
     </style>
 </head>
 <body>
-    <h1>Web Interface Removed</h1>
-    <p>The heavy web interface has been removed as requested. This environment is now purely focused on your Python scripts and training processes.</p>
-    <p>You can execute your scripts using the terminal.</p>
+    <div class="container">
+        <h1>Quadcopter Environment Scene</h1>
+        <p>This is a snapshot of the initialized environment in its starting state.</p>
+        <img src="/scene.png" class="scene-image" alt="Quadcopter Scene" onerror="this.src=''; this.alt='scene.png not found. Wait for the build process to finish creating it.';">
+    </div>
 </body>
 </html>
