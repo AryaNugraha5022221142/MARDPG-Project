@@ -25,14 +25,10 @@ def load_config():
 def generate_scene():
     config = load_config()
     
-    # Initialize environment with human render mode to create plot objects
-    print("Initializing environment...")
     env_config = config.get('environment', config)
-    env = QuadcopterKinematicEnv(num_agents=3, config=env_config, render_mode="human")
+    scenes = config.get('evaluation', {}).get('scenes', ["urban", "forest", "terrain", "structured", "dynamic"])
     
-    # Reset environment to get a new random configuration
-    print("Generating a random scene...")
-    obs, info = env.reset()
+    print(f"Generating snapshots for {len(scenes)} scenarios: {scenes}")
     
     # Wait, the render() method in envs uses interactive plotting which might conflict with Agg
     # But usually plt.pause is a no-op if Agg or fails. Let's patch plt.pause temporarily.
@@ -40,16 +36,22 @@ def generate_scene():
     plt.pause = lambda x: None
     
     try:
-        env.render()
-        # Save the figure instead of showing it
-        save_path = os.path.join(project_root, "scene.png")
-        env.fig.savefig(save_path, bbox_inches='tight', dpi=150)
-        print(f"✅ Environment snapshot saved successfully to: {save_path}")
+        for scenario in scenes:
+            print(f"Initializing scene: {scenario}...")
+            env = QuadcopterKinematicEnv(num_agents=3, config=env_config, render_mode="human", scenario=scenario)
+            
+            obs, info = env.reset()
+            env.render()
+            
+            save_path = os.path.join(project_root, f"scene_{scenario}.png")
+            env.fig.savefig(save_path, bbox_inches='tight', dpi=150)
+            print(f"✅ Saved: {save_path}")
+            
+            env.close()
     except Exception as e:
         print(f"Error while rendering: {e}")
     finally:
         plt.pause = _plt_pause
-        env.close()
 
 if __name__ == '__main__':
     generate_scene()
