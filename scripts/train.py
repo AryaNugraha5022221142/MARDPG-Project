@@ -26,6 +26,37 @@ def _make_agent(agent_type, obs_dim, action_dim, num_agents, config, device):
     else:
         raise ValueError(f"Unknown agent type {agent_type}")
 
+def save_learning_curve(data, title, ylabel, filename, color, ylim=None, log_dir=None):
+    """Generic learning curve plotter."""
+    plt.figure(figsize=(10, 6))
+    plt.style.use('seaborn-v0_8-whitegrid')
+    
+    series = pd.Series(data).dropna()
+    if series.empty:
+        plt.close()
+        return
+    
+    window_size = min(100, max(1, len(data) // 5))
+    smooth = series.rolling(window=window_size, min_periods=1).mean()
+    std = series.rolling(window=window_size, min_periods=1).std().fillna(0)
+    
+    plt.plot(smooth.index, smooth.values, label=f'Mean', color=color, linewidth=2)
+    plt.fill_between(smooth.index, (smooth - std).values, (smooth + std).values,
+                     color=color, alpha=0.2, label='Std Dev')
+    
+    plt.title(title, fontsize=14, fontweight='bold')
+    plt.xlabel('Episodes', fontsize=12)
+    plt.ylabel(ylabel, fontsize=12)
+    if ylim:
+        plt.ylim(ylim)
+    plt.legend()
+    plt.grid(True, linestyle=':', alpha=0.6)
+    
+    filepath = os.path.join(log_dir, filename)
+    plt.savefig(filepath, dpi=300)
+    plt.close()
+    print(f"Saved: {filepath}")
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='config/config.yaml', help='Path to config file')
@@ -130,7 +161,6 @@ def main():
     recent_success = deque(maxlen=100)
     recent_lengths = deque(maxlen=100)
     recent_collisions = deque(maxlen=100)
-    recent_collisions_per_agent = deque(maxlen=100)
     recent_trapped = deque(maxlen=100)
     recent_path_eff = deque(maxlen=100)
     
@@ -215,6 +245,79 @@ def main():
         elif checkpoint_path:
             print(f"Checkpoint {checkpoint_path} not found. Starting from scratch.")
 
+    def apply_curriculum(agent, env, config, episode, device):
+        """Check if curriculum transition needed and reinitialize."""
+        schedule = config.get('curriculum', {}).get('schedule', {})
+        
+        # Find current target agent count
+        target_n = None
+        for ep_threshold, n_agents in sorted([(int(k), v) for k, v in schedule.items()]):
+            if episode >= ep_threshold:
+                target_n = n_agents
+        
+        if target_n is None or target_n == agent.num_agents:
+            return agent, env  # No change needed
+        
+        print(f"[Curriculum] Scaling from {agent.num_agents} to {target_n} agents at episode {episode}")
+        
+        # Create new env
+        new_env = create_env(
+            num_agents=target_n,
+            scenario=args.scenario,
+            config=config,
+            render_mode=args.render,
+            seed=seed
+        )
+        
+        # Create new agent
+        new_agent = _make_agent(
+            args.agent,
+            new_env.obs_dim,
+            getattr(new_env, 'action_dim', 2),
+            target_n,
+            config,
+            device
+        )
+        
+        # Transfer weights for compatible parts
+        if config.get('curriculum', {}).get('transfer_weights', True):
+            # Transfer shared base network
+            new_agent.actor.shared_base.load_state_dict(agent.actor.shared_base.state_dict())
+            new_agent.actor_target.shared_base.load_state_dict(agent.actor_target.shared_base.state_dict())
+            
+            # Transfer existing agent heads (up to min of old/new count)
+            n_transfer = min(agent.num_agents, new_agent.num_agents)
+            for i in range(n_transfer):
+                new_agent.actor.heads[i].load_state_dict(agent.actor.heads[i].state_dict())
+                new_agent.actor_target.heads[i].load_state_dict(agent.actor_target.heads[i].state_dict())
+            
+            # Transfer critic base (if attention-based, attention weights transfer)
+            for i in range(min(len(agent.critics), len(new_agent.critics))):
+                # Transfer encoder and attention layers
+                new_agent.critics[i].encoder.load_state_dict(agent.critics[i].encoder.state_dict())
+                new_agent.critics[i].attention.load_state_dict(agent.critics[i].attention.state_dict())
+                new_agent.critics[i].ffn.load_state_dict(agent.critics[i].ffn.state_dict())
+                new_agent.critics[i].lstm.load_state_dict(agent.critics[i].lstm.state_dict())
+                
+                new_agent.critics_target[i].encoder.load_state_dict(agent.critics_target[i].encoder.state_dict())
+                new_agent.critics_target[i].attention.load_state_dict(agent.critics_target[i].attention.state_dict())
+                new_agent.critics_target[i].ffn.load_state_dict(agent.critics_target[i].ffn.state_dict())
+                new_agent.critics_target[i].lstm.load_state_dict(agent.critics_target[i].lstm.state_dict())
+            
+            try:
+                # Try to transfer optimizers
+                new_agent.actor_optimizer.load_state_dict(agent.actor_optimizer.state_dict())
+                for i in range(min(len(agent.critic_optimizers), len(new_agent.critic_optimizers))):
+                    new_agent.critic_optimizers[i].load_state_dict(agent.critic_optimizers[i].state_dict())
+            except Exception as e:
+                print(f"Failed to transfer optimizer state: {e}")
+        
+        # Clear replay buffer to avoid dimension mismatch
+        if config.get('curriculum', {}).get('reset_buffer', True):
+            new_agent.memory.clear()
+        
+        return new_agent, new_env
+
     print(f"Starting training for {num_episodes} episodes...")
 
     # FIX 2d: Paper trains on five benchmark scene types randomly selected each episode.
@@ -224,6 +327,10 @@ def main():
     pbar = tqdm(range(start_episode, num_episodes + 1), desc="Training", initial=start_episode - 1, total=num_episodes)
     try:
         for episode in pbar:
+            if config.get('curriculum', {}).get('enabled', False):
+                agent, env = apply_curriculum(agent, env, config, episode, device)
+                current_num_agents = agent.num_agents
+
             if episode <= warmup_until:
                 # Linear warmup from 0.3 to 1.0
                 scale = 0.3 + 0.7 * (episode / warmup_until)
@@ -322,7 +429,6 @@ def main():
             
             agent_col_rate = info.get('agent_collision', np.zeros(current_num_agents, dtype=bool)).sum() / current_num_agents
             recent_collisions.append(agent_col_rate)
-            recent_collisions_per_agent.append(agent_col_rate)
             recent_sat_rates.append(np.mean(episode_sat_rates))
             recent_act_stds.append(np.mean(episode_act_stds))
             
@@ -447,148 +553,25 @@ def main():
     
     # --- ACADEMIC PLOTTING (Fig 8 Style) ---
     print("Generating Academic Learning Curves...")
-    plt.figure(figsize=(10, 6))
-    plt.style.use('seaborn-v0_8-whitegrid')
     
-    # Smooth the reward curve
-    window_size = min(100, max(1, len(reward_history) // 5))  # dynamic window size
-    rewards_series = pd.Series(reward_history)
-    smooth_rewards = rewards_series.rolling(window=window_size, min_periods=1).mean()
-    std_rewards = rewards_series.rolling(window=window_size, min_periods=1).std().fillna(0)
+    plots = [
+        (reward_history, 'Reward', 'Reward', f'learning_curve_reward_{args.agent}.png', '#c0392b', [-700, 700]),
+        (success_history, 'Success Rate', 'Success Rate', f'learning_curve_success_{args.agent}.png', '#2ecc71', [0, 1.1]),
+        (length_history, 'Average Episode Length', 'Steps', f'learning_curve_length_{args.agent}.png', '#3498db', None),
+        (collision_history, 'Average Collision Rate', 'Collision Rate', f'learning_curve_collision_{args.agent}.png', '#9b59b6', [0, 1.1]),
+        (critic_loss_history, 'Critic Loss (TD Error)', 'MSE Loss', f'learning_curve_critic_loss_{args.agent}.png', '#e74c3c', None),
+        (actor_loss_history, 'Actor Loss', 'Loss', f'learning_curve_actor_loss_{args.agent}.png', '#2ecc71', None),
+        (q_value_mag_history, 'Mean Q-Value Magnitude', '|Q(s,a)|', f'learning_curve_q_mag_{args.agent}.png', '#f1c40f', None),
+        (hidden_state_norm_history, 'Hidden State Norm ||h_t||_2', 'L2 Norm', f'learning_curve_h_norm_{args.agent}.png', '#8e44ad', None),
+        (action_smoothness_history, 'Action Smoothness |a_t - a_{t-1}|', 'Mean Absolute Difference', f'learning_curve_action_smoothness_{args.agent}.png', '#d35400', None),
+        (tracking_error_history, 'Velocity Tracking Error |v_{ref} - v|', 'Mean Absolute Error', f'learning_curve_tracking_error_{args.agent}.png', '#16a085', None),
+        (min_agent_dist_history, 'Minimum Inter-Agent Distance', 'Distance (m)', f'learning_curve_min_agent_dist_{args.agent}.png', '#2980b9', None)
+    ]
     
-    plt.plot(smooth_rewards.index, smooth_rewards.values, label=f'{args.agent.upper()} (Mean Reward)', color='#c0392b', linewidth=2)
-    plt.fill_between(smooth_rewards.index, 
-                     (smooth_rewards - std_rewards).values, 
-                     (smooth_rewards + std_rewards).values, 
-                     color='#c0392b', alpha=0.2, label='Std Dev')
-    
-    plt.title(f'Reward during all the training episodes ({args.agent.upper()})', fontsize=14, fontweight='bold')
-    plt.xlabel('Number of history trajectories (Episodes)', fontsize=12)
-    plt.ylabel('Reward', fontsize=12)
-    plt.ylim([-700, 700])
-    plt.legend()
-    plt.grid(True, linestyle=':', alpha=0.6)
-    plt.savefig(os.path.join(config['logging']['log_dir'], f'learning_curve_reward_{args.agent}.png'), dpi=300)
-    
-    # Success Rate Plot
-    plt.figure(figsize=(10, 6))
-    success_series = pd.Series(success_history)
-    smooth_success = success_series.rolling(window=window_size, min_periods=1).mean()
-    plt.plot(smooth_success.index, smooth_success.values, color='#2ecc71', linewidth=2)
-    plt.title(f'Average Success Rate during Training ({args.agent.upper()})', fontsize=14, fontweight='bold')
-    plt.xlabel('Episodes', fontsize=12)
-    plt.ylabel('Success Rate', fontsize=12)
-    plt.ylim(0, 1.1)
-    plt.grid(True, linestyle=':', alpha=0.6)
-    plt.savefig(os.path.join(config['logging']['log_dir'], f'learning_curve_success_{args.agent}.png'), dpi=300)
-    
-    # Episode Length Plot
-    plt.figure(figsize=(10, 6))
-    length_series = pd.Series(length_history)
-    smooth_length = length_series.rolling(window=window_size, min_periods=1).mean()
-    plt.plot(smooth_length.index, smooth_length.values, color='#3498db', linewidth=2)
-    plt.title(f'Average Episode Length during Training ({args.agent.upper()})', fontsize=14, fontweight='bold')
-    plt.xlabel('Episodes', fontsize=12)
-    plt.ylabel('Steps', fontsize=12)
-    plt.grid(True, linestyle=':', alpha=0.6)
-    plt.savefig(os.path.join(config['logging']['log_dir'], f'learning_curve_length_{args.agent}.png'), dpi=300)
-    
-    # Collision Rate Plot
-    plt.figure(figsize=(10, 6))
-    collision_series = pd.Series(collision_history)
-    smooth_collision = collision_series.rolling(window=window_size, min_periods=1).mean()
-    plt.plot(smooth_collision.index, smooth_collision.values, color='#9b59b6', linewidth=2)
-    plt.title(f'Average Collision Rate during Training ({args.agent.upper()})', fontsize=14, fontweight='bold')
-    plt.xlabel('Episodes', fontsize=12)
-    plt.ylabel('Collision Rate', fontsize=12)
-    plt.ylim(0, 1.1)
-    plt.grid(True, linestyle=':', alpha=0.6)
-    plt.savefig(os.path.join(config['logging']['log_dir'], f'learning_curve_collision_{args.agent}.png'), dpi=300)
-    
-    # Critic Loss Plot
-    plt.figure(figsize=(10, 6))
-    critic_series = pd.Series(critic_loss_history).dropna()
-    if not critic_series.empty:
-        smooth_critic = critic_series.rolling(window=window_size, min_periods=1).mean()
-        plt.plot(smooth_critic.index, smooth_critic.values, color='#e74c3c', linewidth=2)
-        plt.title(f'Critic Loss (TD Error) during Training ({args.agent.upper()})', fontsize=14, fontweight='bold')
-        plt.xlabel('Episodes', fontsize=12)
-        plt.ylabel('MSE Loss', fontsize=12)
-        plt.grid(True, linestyle=':', alpha=0.6)
-        plt.savefig(os.path.join(config['logging']['log_dir'], f'learning_curve_critic_loss_{args.agent}.png'), dpi=300)
-    
-    # Actor Loss Plot
-    plt.figure(figsize=(10, 6))
-    actor_series = pd.Series(actor_loss_history).dropna()
-    if not actor_series.empty:
-        smooth_actor = actor_series.rolling(window=window_size, min_periods=1).mean()
-        plt.plot(smooth_actor.index, smooth_actor.values, color='#2ecc71', linewidth=2)
-        plt.title(f'Actor Loss during Training ({args.agent.upper()})', fontsize=14, fontweight='bold')
-        plt.xlabel('Episodes', fontsize=12)
-        plt.ylabel('Loss', fontsize=12)
-        plt.grid(True, linestyle=':', alpha=0.6)
-        plt.savefig(os.path.join(config['logging']['log_dir'], f'learning_curve_actor_loss_{args.agent}.png'), dpi=300)
+    for data, title, ylabel, fname, color, ylim in plots:
+        save_learning_curve(data, f'{title} during Training ({args.agent.upper()})', 
+                            ylabel, fname, color, ylim, config['logging']['log_dir'])
 
-    # Q-Value Magnitude Plot
-    plt.figure(figsize=(10, 6))
-    qmag_series = pd.Series(q_value_mag_history).dropna()
-    if not qmag_series.empty:
-        smooth_qmag = qmag_series.rolling(window=window_size, min_periods=1).mean()
-        plt.plot(smooth_qmag.index, smooth_qmag.values, color='#f1c40f', linewidth=2)
-        plt.title(f'Mean Q-Value Magnitude during Training ({args.agent.upper()})', fontsize=14, fontweight='bold')
-        plt.xlabel('Episodes', fontsize=12)
-        plt.ylabel('|Q(s,a)|', fontsize=12)
-        plt.grid(True, linestyle=':', alpha=0.6)
-        plt.savefig(os.path.join(config['logging']['log_dir'], f'learning_curve_q_mag_{args.agent}.png'), dpi=300)
-        
-    # Hidden State Norm Plot
-    plt.figure(figsize=(10, 6))
-    hnorm_series = pd.Series(hidden_state_norm_history).dropna()
-    if not hnorm_series.empty:
-        smooth_hnorm = hnorm_series.rolling(window=window_size, min_periods=1).mean()
-        plt.plot(smooth_hnorm.index, smooth_hnorm.values, color='#8e44ad', linewidth=2)
-        plt.title(f'Hidden State Norm ||h_t||_2 during Training ({args.agent.upper()})', fontsize=14, fontweight='bold')
-        plt.xlabel('Episodes', fontsize=12)
-        plt.ylabel('L2 Norm', fontsize=12)
-        plt.grid(True, linestyle=':', alpha=0.6)
-        plt.savefig(os.path.join(config['logging']['log_dir'], f'learning_curve_h_norm_{args.agent}.png'), dpi=300)
-    
-    # Action Smoothness Plot
-    plt.figure(figsize=(10, 6))
-    smoothness_series = pd.Series(action_smoothness_history).dropna()
-    if not smoothness_series.empty:
-        smooth_smoothness = smoothness_series.rolling(window=window_size, min_periods=1).mean()
-        plt.plot(smooth_smoothness.index, smooth_smoothness.values, color='#d35400', linewidth=2)
-        plt.title(f'Action Smoothness |a_t - a_{{t-1}}| during Training ({args.agent.upper()})', fontsize=14, fontweight='bold')
-        plt.xlabel('Episodes', fontsize=12)
-        plt.ylabel('Mean Absolute Difference', fontsize=12)
-        plt.grid(True, linestyle=':', alpha=0.6)
-        plt.savefig(os.path.join(config['logging']['log_dir'], f'learning_curve_action_smoothness_{args.agent}.png'), dpi=300)
-
-    # Tracking Error Plot
-    plt.figure(figsize=(10, 6))
-    tracking_series = pd.Series(tracking_error_history).dropna()
-    if not tracking_series.empty:
-        smooth_tracking = tracking_series.rolling(window=window_size, min_periods=1).mean()
-        plt.plot(smooth_tracking.index, smooth_tracking.values, color='#16a085', linewidth=2)
-        plt.title(f'Velocity Tracking Error |v_{{ref}} - v| during Training ({args.agent.upper()})', fontsize=14, fontweight='bold')
-        plt.xlabel('Episodes', fontsize=12)
-        plt.ylabel('Mean Absolute Error', fontsize=12)
-        plt.grid(True, linestyle=':', alpha=0.6)
-        plt.savefig(os.path.join(config['logging']['log_dir'], f'learning_curve_tracking_error_{args.agent}.png'), dpi=300)
-
-    # Min Agent Distance Plot
-    plt.figure(figsize=(10, 6))
-    min_dist_series = pd.Series(min_agent_dist_history).dropna()
-    if not min_dist_series.empty:
-        smooth_min_dist = min_dist_series.rolling(window=window_size, min_periods=1).mean()
-        plt.plot(smooth_min_dist.index, smooth_min_dist.values, color='#2980b9', linewidth=2)
-        plt.title(f'Minimum Inter-Agent Distance during Training ({args.agent.upper()})', fontsize=14, fontweight='bold')
-        plt.xlabel('Episodes', fontsize=12)
-        plt.ylabel('Distance (m)', fontsize=12)
-        plt.grid(True, linestyle=':', alpha=0.6)
-        plt.savefig(os.path.join(config['logging']['log_dir'], f'learning_curve_min_agent_dist_{args.agent}.png'), dpi=300)
-    
     print(f"Training complete! Plots saved to {config['logging']['log_dir']}")
 
 if __name__ == '__main__':

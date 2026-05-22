@@ -115,42 +115,90 @@ class MultiActorLSTMBaseline(nn.Module):
 
         return actions, hidden_out, lstm_out, (rho, tau)
 
-class CriticLSTMBaseline(nn.Module):
-    """
-    Centralized Critic network.
-    Takes joint observations and joint actions directly.
-    """
-    def __init__(self, obs_dim: int, action_dim: int = 2, num_agents: int = 3, hidden_dim: int = 128):
+class AttentionCritic(nn.Module):
+    def __init__(self, obs_dim: int, action_dim: int, num_agents: int, 
+                 hidden_dim: int = 128, n_heads: int = 4, dropout: float = 0.1):
         super().__init__()
-        self.num_layers = 1
+        self.num_agents = num_agents
         self.hidden_dim = hidden_dim
         
-        input_dim = (obs_dim * num_agents) + (action_dim * num_agents)
-            
-        self.fc_embed = nn.Linear(input_dim, hidden_dim)
+        # Per-agent encoder
+        self.encoder = nn.Sequential(
+            nn.Linear(obs_dim + action_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim)
+        )
+        
+        # Multi-head self-attention over agents
+        self.attention = nn.MultiheadAttention(
+            embed_dim=hidden_dim,
+            num_heads=n_heads,
+            dropout=dropout,
+            batch_first=True
+        )
+        
+        # Feed-forward after attention
+        self.ffn = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim * 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim * 2, hidden_dim)
+        )
+        
+        self.norm1 = nn.LayerNorm(hidden_dim)
+        self.norm2 = nn.LayerNorm(hidden_dim)
+        
+        # LSTM for temporal processing
         self.lstm = nn.LSTM(hidden_dim, hidden_dim, num_layers=1, batch_first=True)
         self.fc_out = nn.Linear(hidden_dim, 1)
-
-    def init_hidden(self, batch_size: int = 1, device: str = 'cpu') -> Tuple[torch.Tensor, torch.Tensor]:
-        h0 = torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(device)
-        c0 = torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(device)
-        return (h0, c0)
-
-    def forward(self, obs: torch.Tensor, actions: torch.Tensor, hidden: Tuple[torch.Tensor, torch.Tensor] = None, agent_idx: int = None):
-        batch_size = obs.size(0)
-        seq_len = obs.size(1)
         
-        o_flat = obs.view(batch_size, seq_len, -1)
-        a_flat = actions.view(batch_size, seq_len, -1)
-        x = torch.cat([o_flat, a_flat], dim=2)
-            
-        x = F.relu(self.fc_embed(x))
+    def init_hidden(self, batch_size: int = 1, device: str = 'cpu'):
+        h0 = torch.zeros(1, batch_size, self.hidden_dim).to(device)
+        c0 = torch.zeros(1, batch_size, self.hidden_dim).to(device)
+        return (h0, c0)
+    
+    def forward(self, obs: torch.Tensor, actions: torch.Tensor, 
+                hidden: Tuple[torch.Tensor, torch.Tensor] = None,
+                agent_idx: int = None):
+        """
+        obs: (batch_size, seq_len, num_agents, obs_dim)
+        actions: (batch_size, seq_len, num_agents, action_dim)
+        """
+        batch_size, seq_len, N, _ = obs.shape
+        
+        # Encode each agent's (obs, action) pair
+        x = torch.cat([obs, actions], dim=-1)           # (B, T, N, obs+act)
+        x = self.encoder(x)                            # (B, T, N, hidden_dim)
+        
+        # Reshape for attention: (B*T, N, hidden_dim)
+        x_flat = x.view(batch_size * seq_len, N, self.hidden_dim)
+        
+        # Self-attention: each agent attends to all agents
+        attn_out, attn_weights = self.attention(x_flat, x_flat, x_flat)
+        # attn_out: (B*T, N, hidden_dim)
+        # attn_weights: (B*T, N, N) - interpretable interaction weights!
+        
+        # Residual + LayerNorm
+        x_flat = self.norm1(x_flat + attn_out)
+        
+        # Feed-forward
+        ff_out = self.ffn(x_flat)
+        x_flat = self.norm2(x_flat + ff_out)
+        
+        # Pool across agents (mean pooling for centralized Q)
+        # Alternative: use agent_idx to select specific agent's embedding
+        pooled = x_flat.mean(dim=1)  # (B*T, hidden_dim)
+        
+        # Reshape for LSTM: (B, T, hidden_dim)
+        pooled = pooled.view(batch_size, seq_len, self.hidden_dim)
+        
         if hidden is None:
-            hidden = self.init_hidden(batch_size, x.device)
+            hidden = self.init_hidden(batch_size, pooled.device)
             
-        y, new_h = self.lstm(x, hidden)
-        return self.fc_out(y), new_h
-
+        lstm_out, new_hidden = self.lstm(pooled, hidden)
+        q_value = self.fc_out(lstm_out)  # (B, T, 1)
+        
+        return q_value, new_hidden
 
 class MARDPG_Baseline:
     """
@@ -188,7 +236,7 @@ class MARDPG_Baseline:
         
         critic_hidden_dim = config['network'].get('critic', {}).get('hidden_dim', hidden_dim)
         
-        self.critics = [CriticLSTMBaseline(obs_dim, action_dim, num_agents, critic_hidden_dim).to(self.device) for _ in range(num_agents)]
+        self.critics = [AttentionCritic(obs_dim, action_dim, num_agents, critic_hidden_dim, n_heads=4).to(self.device) for _ in range(num_agents)]
         self.critics_target = [copy.deepcopy(c).to(self.device) for c in self.critics]
         
         actor_lr = config['learning'].get('actor_lr', 1e-4)

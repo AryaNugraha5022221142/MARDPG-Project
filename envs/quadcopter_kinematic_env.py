@@ -210,9 +210,9 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
             ranges_norm = ranges / self.max_range
             ranges_norm = np.clip(ranges_norm, 0.0, 1.0)
             
-            # Using constant diagonal normalization equivalent to what it trained on (e.g. 100x100x40 ~ 147m)
-            # This prevents spatial observation drift when arena volume is expanded dynamically
-            goal_dist = np.linalg.norm(goal - pos) / 147.0
+            # Using dynamic diagonal normalization to prevent spatial observation drift
+            arena_diagonal = np.linalg.norm(self.arena_size)
+            goal_dist = np.linalg.norm(goal - pos) / arena_diagonal
             dx, dy, dz = goal - pos
             goal_h_angle = (np.arctan2(dy, dx) - yaw + np.pi) % (2*np.pi) - np.pi
             goal_v_angle = (np.arctan2(dz, np.sqrt(dx**2+dy**2)) - pitch + np.pi) % (2*np.pi) - np.pi
@@ -288,12 +288,24 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
             alpha, lam, sigma = 3.0, 5.0, 15.0
             delta = [0.45, 0.30, 0.15, 0.10]
             
+            d_min_agent = float('inf')
+            for j in range(self.num_agents):
+                if i == j or self.agent_dones[j]:
+                    continue
+                d = np.linalg.norm(pos - self.agents[j].state[0:3]) - 0.6  # 0.3 radius each
+                if d < d_min_agent:
+                    d_min_agent = d
+                    
+            lambda_sep = 2.0
+            sigma_sep = 5.0
+            r_sep = -lambda_sep * math.exp(-sigma_sep * max(0.0, d_min_agent))
+            
             r_trans = alpha * (old_dist_to_goal - dist_to_goal)
             r_col   = -lam * math.exp(-sigma * d_min)
             r_free  = 0.1 if all_clear else 0.0
             r_step  = -0.6
             
-            rewards[i] = delta[0]*r_trans + delta[1]*r_col + delta[2]*r_free + delta[3]*r_step
+            rewards[i] = delta[0]*r_trans + delta[1]*r_col + delta[2]*r_free + delta[3]*r_step + r_sep
             
             if dist_to_goal < self.goal_dist:
                 self.agent_dones[i] = True

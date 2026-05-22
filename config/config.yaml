@@ -20,14 +20,14 @@ learning:
   max_grad_norm: 1.0
 
 memory:
-  buffer_size: 500
-  batch_size: 128
+  buffer_size: 2000
+  batch_size: 64
   seq_len: 80
 
-update_interval: 100
+update_interval: 20
 
 targets:
-  update_rate: 0.01
+  update_rate: 0.03
 
 # FIX 5d: Annealed Gaussian exploration noise parameters (see AnnealedGaussianNoise).
 # sigma_start=0.3 covers ~57% of the ±π/6 action range for early exploration.
@@ -66,6 +66,16 @@ obs_structure:
   angles: [0, 2]        # 2 dims: [pitch, yaw]
   ranges: [2, 27]       # 25 dims: rangefinder
   goal: [27, 30]        # 3 dims: [dist, h_angle, v_angle]
+
+curriculum:
+  enabled: true
+  schedule:
+    0: 3      # Episode 0-499: 3 agents
+    500: 5    # Episode 500-1499: 5 agents
+    1500: 7   # Episode 1500-2999: 7 agents
+    3000: 10  # Episode 3000+: 10 agents
+  reset_buffer: true  # Clear replay buffer on transition
+  transfer_weights: true  # Transfer compatible weights
 
 logging:
   log_dir: "logs"
