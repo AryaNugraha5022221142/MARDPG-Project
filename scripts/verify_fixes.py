@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Verification script for all fixes."""
 
-import os
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from pathlib import Path
+
+# Fix: Add project root to Python path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
 import torch
 import numpy as np
-from agents.mardpg_baseline import MARDPG_Baseline, AttentionCritic
+from agents.mardpg_baseline import MARDPG_Baseline, AnnealedGaussianNoise, AttentionCritic
 
 def test_lr_scaling():
     """Fix 1: Critic LR scaling."""
