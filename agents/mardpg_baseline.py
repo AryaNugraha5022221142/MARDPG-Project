@@ -236,7 +236,10 @@ class MARDPG_Baseline:
         
         critic_hidden_dim = config['network'].get('critic', {}).get('hidden_dim', hidden_dim)
         
-        self.critics = [AttentionCritic(obs_dim, action_dim, num_agents, critic_hidden_dim, n_heads=4).to(self.device) for _ in range(num_agents)]
+        self.critics = [
+            AttentionCritic(obs_dim, action_dim, num_agents, critic_hidden_dim, n_heads=4).to(self.device)
+            for _ in range(num_agents)
+        ]
         self.critics_target = [copy.deepcopy(c).to(self.device) for c in self.critics]
         
         actor_lr = config['learning'].get('actor_lr', 1e-4)

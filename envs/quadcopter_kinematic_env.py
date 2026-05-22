@@ -298,7 +298,9 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
                     
             lambda_sep = 2.0
             sigma_sep = 5.0
-            r_sep = -lambda_sep * math.exp(-sigma_sep * max(0.0, d_min_agent))
+            r_sep = 0.0
+            if d_min_agent != float('inf'):
+                r_sep = -lambda_sep * np.exp(-sigma_sep * d_min_agent)
             
             r_trans = alpha * (old_dist_to_goal - dist_to_goal)
             r_col   = -lam * math.exp(-sigma * d_min)
