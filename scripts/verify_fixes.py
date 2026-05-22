@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Verification script for all fixes."""
 
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import torch
 import numpy as np
-from agents.mardpg_baseline import MARDPG_Baseline, AnnealedGaussianNoise, AttentionCritic
+from agents.mardpg_baseline import MARDPG_Baseline, AttentionCritic
 
 def test_lr_scaling():
     """Fix 1: Critic LR scaling."""
