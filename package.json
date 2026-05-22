@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "python3 -m http.server 3000",
     "build": "mkdir -p dist && echo 'Done' > dist/index.html",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "train": "python3 scripts/train.py --num-episodes 500"
   }
 }
