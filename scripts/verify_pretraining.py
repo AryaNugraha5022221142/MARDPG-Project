@@ -79,7 +79,9 @@ def test_attention_critic():
     
     # Attention weights
     x = torch.randn(2, 5, 128)
-    attn_out, weights = critic.attention(x, x, x)
+    critic.eval()
+    with torch.no_grad():
+        attn_out, weights = critic.attention(x, x, x)
     
     assert weights.shape == (2, 5, 5), f"FAIL: attention weights {weights.shape} != (2,5,5)"
     print("  ✓ Attention weights shape correct (5x5 pairwise)")
@@ -106,7 +108,7 @@ def test_ctde_separation():
     agent = MARDPG_Baseline(obs_dim=30, action_dim=2, num_agents=3)
     
     # Actor: single-agent input
-    obs_single = torch.randn(1, 1, 30)
+    obs_single = torch.randn(1, 30)
     hidden = agent.actor.init_hidden(1, 'cpu')
     action, new_h, _, _ = agent.actor(obs_single, hidden, agent_idx=0)
     
@@ -179,6 +181,11 @@ def test_checkpoint_resume():
     for opt in agent.critic_optimizers:
         opt.step()
     agent.actor_optimizer.zero_grad()
+    obs_single = torch.randn(1, 30)
+    hidden = agent.actor.init_hidden(1, 'cpu')
+    act_out, _, _, _ = agent.actor(obs_single, hidden, agent_idx=0)
+    actor_loss = act_out.sum()
+    actor_loss.backward()
     agent.actor_optimizer.step()
     
     # Save

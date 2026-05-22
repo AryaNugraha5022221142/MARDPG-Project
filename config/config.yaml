@@ -29,15 +29,11 @@ update_interval: 20
 targets:
   update_rate: 0.03
 
-# FIX 5d: Annealed Gaussian exploration noise parameters (see AnnealedGaussianNoise).
-# sigma_start=0.3 covers ~57% of the ±π/6 action range for early exploration.
-# total_steps = 10000 episodes × ~500 avg steps = 5M.
 exploration:
   sigma_start: 0.3
   sigma_end: 0.05
   total_steps: 5000000
 
-# FIX 1d: terminal bonuses now used by kinematic env baseline reward path
 rewards:
   goal_bonus: 0.0
   collision_penalty: 0.0
@@ -57,25 +53,27 @@ environment:
   reward_type: "baseline"
   rate_limit_per_step: 1.0
   randomize_layouts: true
+  sensor_noise_std: 0.02
+  yaw_noise_std: 0.034906585
 
 evaluation:
   scenes: ["urban", "forest", "terrain", "structured", "dynamic"]
   level: 3
 
 obs_structure:
-  angles: [0, 2]        # 2 dims: [pitch, yaw]
-  ranges: [2, 27]       # 25 dims: rangefinder
-  goal: [27, 30]        # 3 dims: [dist, h_angle, v_angle]
+  angles: [0, 2]
+  ranges: [2, 27]
+  goal: [27, 30]
 
 curriculum:
   enabled: true
   schedule:
-    0: 3      # Episode 0-499: 3 agents
-    500: 5    # Episode 500-1499: 5 agents
-    1500: 7   # Episode 1500-2999: 7 agents
-    3000: 10  # Episode 3000+: 10 agents
-  reset_buffer: true  # Clear replay buffer on transition
-  transfer_weights: true  # Transfer compatible weights
+    0: 3
+    500: 5
+    1500: 7
+    3000: 10
+  reset_buffer: true
+  transfer_weights: true
 
 logging:
   log_dir: "logs"
