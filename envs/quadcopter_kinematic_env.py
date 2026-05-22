@@ -244,6 +244,12 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
             if self.agent_dones[i]: continue
             
             action = np.asarray(actions[i], dtype=np.float32).copy()
+            delta = action - self.prev_actions[i]
+            action = self.prev_actions[i] + np.clip(
+                delta, 
+                -self.rate_limit_per_step, 
+                +self.rate_limit_per_step
+            )
             action_smoothness.append(np.mean(np.abs(action - self.prev_actions[i])))
             self.prev_actions[i] = action.copy()
             
