@@ -300,14 +300,20 @@ def test_burn_in_mask():
     """Verify burn-in masking for recurrent training."""
     print("=== Burn-in Mask ===")
     
-    seq_len = 80
-    burn_in = seq_len // 4  # 20
+    config = load_config()
+    seq_len = config['memory']['seq_len']     # reads actual value (currently 40)
+    burn_in = seq_len // 4
+    valid_len = seq_len - burn_in
     
     mask = torch.ones(2, seq_len, 3)
     mask[:, :burn_in, :] = 0.0
     
-    assert mask[:, :20, :].sum() == 0, "FAIL: burn-in not zeroed"
-    assert mask[:, 20:, :].sum() == 2 * 60 * 3, "FAIL: valid region incorrect"
+    assert mask[:, :burn_in, :].sum() == 0, \
+        f"FAIL: burn-in first {burn_in} steps not zeroed"
+    assert mask[:, burn_in:, :].sum() == 2 * valid_len * 3, \
+        f"FAIL: valid region ({valid_len} steps) sum incorrect"
+    
+    print(f"  ✓ seq_len={seq_len}, burn_in={burn_in}, valid={valid_len} steps ({100*valid_len//seq_len}% of sequence)")
     print(f"  ✓ Burn-in mask correct (first {burn_in} steps masked)")
     print("  ✓ All burn-in checks passed\n")
     return True

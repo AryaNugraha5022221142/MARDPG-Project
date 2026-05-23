@@ -349,10 +349,10 @@ def main():
                 print("Optimizer state partially transferred.")
             except Exception as e:
                 print(f"Optimizer warm-start failed ({e}), using LR warmup instead.")
-            
-            # Post-curriculum LR warmup (50 episodes)
-            new_agent._curriculum_warmup_remaining = 50
         
+        # Post-curriculum LR warmup (50 episodes)
+        new_agent._curriculum_warmup_remaining = 50
+
         # Clear replay buffer to avoid dimension mismatch
         if config.get('curriculum', {}).get('reset_buffer', True):
             new_agent.memory.clear()
@@ -373,10 +373,10 @@ def main():
                 current_num_agents = agent.num_agents
 
             if hasattr(agent, '_curriculum_warmup_remaining') and agent._curriculum_warmup_remaining > 0:
-                agent._curriculum_warmup_remaining -= 1
                 warmup_len = 50
                 scale = 0.3 + 0.7 * (1.0 - agent._curriculum_warmup_remaining / warmup_len)
                 set_lr_scale(agent, scale)
+                agent._curriculum_warmup_remaining -= 1
             elif episode <= warmup_until:
                 # Linear warmup from 0.3 to 1.0
                 scale = 0.3 + 0.7 * (episode / warmup_until)

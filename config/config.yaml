@@ -28,7 +28,7 @@ memory:
 update_interval: 20
 
 targets:
-  update_rate: 0.03
+  update_rate: 0.01
 
 exploration:
   sigma_start: 0.3
