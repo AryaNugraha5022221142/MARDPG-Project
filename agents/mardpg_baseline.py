@@ -187,7 +187,10 @@ class AttentionCritic(nn.Module):
         
         # Pool across agents (mean pooling for centralized Q)
         # Alternative: use agent_idx to select specific agent's embedding
-        pooled = x_flat.mean(dim=1)  # (B*T, hidden_dim)
+        if agent_idx is not None and agent_idx < x_flat.shape[1]:
+            pooled = x_flat[:, agent_idx, :]    # agent-specific embedding (B*T, hidden_dim)
+        else:
+            pooled = x_flat.mean(dim=1)         # fallback
         
         # Reshape for LSTM: (B, T, hidden_dim)
         pooled = pooled.view(batch_size, seq_len, self.hidden_dim)

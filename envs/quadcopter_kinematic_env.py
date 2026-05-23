@@ -220,9 +220,9 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
             
             # [ [ϕ, ϑ], 25 rangefinders, target ξ ]
             obs = np.concatenate([
-                [pitch, yaw],
+                [pitch / (np.pi/2), yaw / np.pi],
                 ranges_norm,
-                [goal_dist, goal_h_angle, goal_v_angle]
+                [goal_dist, goal_h_angle / np.pi, goal_v_angle / np.pi]
             ])
             obs_all.append(obs)
             
@@ -314,7 +314,8 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
             r_free  = 0.1 if all_clear else 0.0
             r_step  = -0.6
             
-            rewards[i] = delta[0]*r_trans + delta[1]*r_col + delta[2]*r_free + delta[3]*r_step + r_sep
+            delta_sep = 0.15
+            rewards[i] = delta[0]*r_trans + delta[1]*r_col + delta[2]*r_free + delta[3]*r_step + delta_sep * r_sep
             
             if dist_to_goal < self.goal_dist:
                 self.agent_dones[i] = True

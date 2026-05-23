@@ -84,7 +84,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() and config['training'].get('device') == 'cuda' else "cpu")
     print(f"Using device: {device}")
 
-    def create_env(num_agents, scenario, config, render_mode, seed):
+    def create_env(num_agents, scenario, config, render_mode, seed, level=None):
         """Single factory function for environment creation."""
         env_config = config['environment'].copy()
         env_config['seed'] = seed
@@ -100,7 +100,7 @@ def main():
             
         env_config['agent_id_dim'] = num_agents
         
-        env_level = config['environment'].get('level', 3)
+        env_level = level if level is not None else config['environment'].get('level', 3)
         
         if scenario is None or scenario in ["urban", "forest", "terrain", "structured", "dynamic"]:
             scenario_name = scenario if scenario else "urban"
@@ -125,13 +125,17 @@ def main():
 
     current_num_agents = config['training']['num_agents']
     
+    curriculum_to_level = {3: 1, 5: 2, 7: 3, 10: 4}
+    initial_level = curriculum_to_level.get(current_num_agents, 1)
+
     # Environment
     env = create_env(
         num_agents=current_num_agents,
         scenario=args.scenario,
         config=config,
         render_mode=args.render,
-        seed=seed
+        seed=seed,
+        level=initial_level
     )
 
     # Agent
@@ -260,13 +264,17 @@ def main():
         
         print(f"[Curriculum] Scaling from {agent.num_agents} to {target_n} agents at episode {episode}")
         
+        curriculum_to_level = {3: 1, 5: 2, 7: 3, 10: 4}
+        env_level = curriculum_to_level.get(target_n, 1)
+
         # Create new env
         new_env = create_env(
             num_agents=target_n,
             scenario=args.scenario,
             config=config,
             render_mode=args.render,
-            seed=seed
+            seed=seed,
+            level=env_level
         )
         
         # Create new agent
@@ -305,12 +313,45 @@ def main():
                 new_agent.critics_target[i].lstm.load_state_dict(agent.critics_target[i].lstm.state_dict())
             
             try:
-                # Try to transfer optimizers
-                new_agent.actor_optimizer.load_state_dict(agent.actor_optimizer.state_dict())
+                # Try to partially transfer optimizers
+                old_actor_sd = agent.actor_optimizer.state_dict()
+                new_actor_sd = new_agent.actor_optimizer.state_dict()
+                
+                # Only transfer param group LR and betas, not the per-param momentum state
+                for old_pg, new_pg in zip(old_actor_sd['param_groups'], 
+                                           new_actor_sd['param_groups'][:len(old_actor_sd['param_groups'])]):
+                    new_pg['lr'] = old_pg['lr']
+                    new_pg['betas'] = old_pg['betas']
+                    if 'eps' in old_pg:
+                        new_pg['eps'] = old_pg['eps']
+                
+                # Transfer state for params that exist in both (shared_base params)
+                for param_id, state in old_actor_sd['state'].items():
+                    if param_id < len(new_actor_sd['param_groups'][0]['params']):
+                        new_actor_sd['state'][param_id] = state
+                
+                new_agent.actor_optimizer.load_state_dict(new_actor_sd)
+                
                 for i in range(min(len(agent.critic_optimizers), len(new_agent.critic_optimizers))):
-                    new_agent.critic_optimizers[i].load_state_dict(agent.critic_optimizers[i].state_dict())
+                    old_critic_sd = agent.critic_optimizers[i].state_dict()
+                    new_critic_sd = new_agent.critic_optimizers[i].state_dict()
+                    for old_pg, new_pg in zip(old_critic_sd['param_groups'], 
+                                           new_critic_sd['param_groups'][:len(old_critic_sd['param_groups'])]):
+                        new_pg['lr'] = old_pg['lr']
+                        new_pg['betas'] = old_pg['betas']
+                        if 'eps' in old_pg:
+                            new_pg['eps'] = old_pg['eps']
+                    for param_id, state in old_critic_sd['state'].items():
+                        if param_id < len(new_critic_sd['param_groups'][0]['params']):
+                            new_critic_sd['state'][param_id] = state
+                    new_agent.critic_optimizers[i].load_state_dict(new_critic_sd)
+
+                print("Optimizer state partially transferred.")
             except Exception as e:
-                print(f"Failed to transfer optimizer state: {e}")
+                print(f"Optimizer warm-start failed ({e}), using LR warmup instead.")
+            
+            # Post-curriculum LR warmup (50 episodes)
+            new_agent._curriculum_warmup_remaining = 50
         
         # Clear replay buffer to avoid dimension mismatch
         if config.get('curriculum', {}).get('reset_buffer', True):
@@ -331,7 +372,12 @@ def main():
                 agent, env = apply_curriculum(agent, env, config, episode, device)
                 current_num_agents = agent.num_agents
 
-            if episode <= warmup_until:
+            if hasattr(agent, '_curriculum_warmup_remaining') and agent._curriculum_warmup_remaining > 0:
+                agent._curriculum_warmup_remaining -= 1
+                warmup_len = 50
+                scale = 0.3 + 0.7 * (1.0 - agent._curriculum_warmup_remaining / warmup_len)
+                set_lr_scale(agent, scale)
+            elif episode <= warmup_until:
                 # Linear warmup from 0.3 to 1.0
                 scale = 0.3 + 0.7 * (episode / warmup_until)
                 set_lr_scale(agent, scale)
@@ -491,7 +537,7 @@ def main():
                 else:
                     current_sigma = 0.0
                 
-                pbar.set_postfix({'Reward': f'{avg_reward:.2f}', 'Success': f'{success_rate:.2f}', 'PathEff': f'{current_path_eff:.2f}', 'Trapped': f'{current_trapped:.2f}'})
+                pbar.set_postfix({'Reward': f'{avg_reward:.2f}', 'Success': f'{success_rate:.2f}', 'PathEff': f'{current_path_eff:.2f}', 'Trapped': f'{current_trapped:.2f}', 'EpLen': f'{avg_length:.1f}'})
                 
                 if use_wandb:
                     log_data = {
