@@ -430,7 +430,7 @@ class MARDPG_Baseline:
         torch.save(state, filepath)
 
     def load(self, filepath: str) -> Tuple[float, int]:
-        state = torch.load(filepath, map_location=self.device)
+        state = torch.load(filepath, map_location=self.device, weights_only=True)
         self.actor.load_state_dict(state['actor'], strict=False)
         if 'actor_target' in state:
             self.actor_target.load_state_dict(state['actor_target'], strict=False)

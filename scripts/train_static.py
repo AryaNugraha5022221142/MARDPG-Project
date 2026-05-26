@@ -1,4 +1,4 @@
-# scripts/train.py
+# scripts/train_static.py
 import argparse
 import yaml
 import os
@@ -60,10 +60,11 @@ def save_learning_curve(data, title, ylabel, filename, color, ylim=None, log_dir
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='config/config.yaml', help='Path to config file')
-    parser.add_argument('--run-name', type=str, default='mardpg_baseline_run', help='Name of the run')
+    parser.add_argument('--run-name', type=str, default='mardpg_baseline_static_run', help='Name of the run')
     parser.add_argument('--agent', type=str, default='mardpg_baseline', choices=['mardpg_baseline'], help='Agent type to train')
     parser.add_argument('--scenario', type=str, default=None, help='Scenario name (e.g., urban_canyon, search_and_rescue)')
     parser.add_argument('--num-episodes', type=int, default=None, help='Number of episodes to train')
+    parser.add_argument('--num-agents', type=int, default=5, help='Number of agents (default 5)')
     parser.add_argument('--seed', type=int, default=None, help='Random seed')
     parser.add_argument('--output-json', type=str, default=None, help='Path to save final metrics as JSON')
     parser.add_argument('--render', action='store_true', help='Enable 3D visualization during training')
@@ -74,6 +75,10 @@ def main():
 
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
+
+    # Disable curriculum learning forcefully for static training
+    if 'curriculum' in config:
+        config['curriculum']['enabled'] = False
 
     # Set seeds
     seed = args.seed if args.seed is not None else config['training'].get('seed', 42)
@@ -123,10 +128,10 @@ def main():
         
         return env
 
-    current_num_agents = config['training']['num_agents']
+    current_num_agents = args.num_agents
     
     curriculum_to_level = {3: 1, 5: 2, 7: 3, 10: 4}
-    initial_level = curriculum_to_level.get(current_num_agents, 1)
+    initial_level = curriculum_to_level.get(current_num_agents, 2)
 
     # Environment
     env = create_env(
@@ -224,10 +229,6 @@ def main():
                 latest_ep = extract_ep(latest_path)
                 
             if os.path.exists(final_path):
-                # The final path might not encode the episode in its name, but if it exists 
-                # after a crash/interrupt, it's usually the latest. 
-                # We can load it and determine the episode. But for simplicity, let's prefer final_path 
-                # if its modification time is newer.
                 if latest_path:
                     if os.path.getmtime(final_path) > os.path.getmtime(latest_path):
                         checkpoint_path = final_path
@@ -249,138 +250,13 @@ def main():
         elif checkpoint_path:
             print(f"Checkpoint {checkpoint_path} not found. Starting from scratch.")
 
-    def apply_curriculum(agent, env, config, episode, device):
-        """Check if curriculum transition needed and reinitialize."""
-        schedule = config.get('curriculum', {}).get('schedule', {})
-        
-        # Find current target agent count
-        target_n = None
-        for ep_threshold, n_agents in sorted([(int(k), v) for k, v in schedule.items()]):
-            if episode >= ep_threshold:
-                target_n = n_agents
-        
-        if target_n is None or target_n == agent.num_agents:
-            return agent, env  # No change needed
-        
-        print(f"[Curriculum] Scaling from {agent.num_agents} to {target_n} agents at episode {episode}")
-        
-        curriculum_to_level = {3: 1, 5: 2, 7: 3, 10: 4}
-        env_level = curriculum_to_level.get(target_n, 1)
+    print(f"Starting static training for {num_episodes} episodes with {current_num_agents} agents...")
 
-        # Create new env
-        new_env = create_env(
-            num_agents=target_n,
-            scenario=args.scenario,
-            config=config,
-            render_mode=args.render,
-            seed=seed,
-            level=env_level
-        )
-        
-        # Create new agent
-        new_agent = _make_agent(
-            args.agent,
-            new_env.obs_dim,
-            getattr(new_env, 'action_dim', 2),
-            target_n,
-            config,
-            device
-        )
-        
-        # Transfer weights for compatible parts
-        if config.get('curriculum', {}).get('transfer_weights', True):
-            # Transfer shared base network
-            new_agent.actor.shared_base.load_state_dict(agent.actor.shared_base.state_dict())
-            new_agent.actor_target.shared_base.load_state_dict(agent.actor_target.shared_base.state_dict())
-            
-            # Transfer existing agent heads (up to min of old/new count)
-            n_transfer = min(agent.num_agents, new_agent.num_agents)
-            for i in range(n_transfer):
-                new_agent.actor.heads[i].load_state_dict(agent.actor.heads[i].state_dict())
-                new_agent.actor_target.heads[i].load_state_dict(agent.actor_target.heads[i].state_dict())
-            
-            # Transfer critic base (if attention-based, attention weights transfer)
-            for i in range(min(len(agent.critics), len(new_agent.critics))):
-                # Transfer encoder and attention layers
-                new_agent.critics[i].encoder.load_state_dict(agent.critics[i].encoder.state_dict())
-                new_agent.critics[i].attention.load_state_dict(agent.critics[i].attention.state_dict())
-                new_agent.critics[i].ffn.load_state_dict(agent.critics[i].ffn.state_dict())
-                new_agent.critics[i].lstm.load_state_dict(agent.critics[i].lstm.state_dict())
-                
-                # Fix: transfer the missing normalization and output layers
-                new_agent.critics[i].norm1.load_state_dict(agent.critics[i].norm1.state_dict())
-                new_agent.critics[i].norm2.load_state_dict(agent.critics[i].norm2.state_dict())
-                new_agent.critics[i].fc_out.load_state_dict(agent.critics[i].fc_out.state_dict())
-                
-                new_agent.critics_target[i].encoder.load_state_dict(agent.critics_target[i].encoder.state_dict())
-                new_agent.critics_target[i].attention.load_state_dict(agent.critics_target[i].attention.state_dict())
-                new_agent.critics_target[i].ffn.load_state_dict(agent.critics_target[i].ffn.state_dict())
-                new_agent.critics_target[i].lstm.load_state_dict(agent.critics_target[i].lstm.state_dict())
-                
-                new_agent.critics_target[i].norm1.load_state_dict(agent.critics_target[i].norm1.state_dict())
-                new_agent.critics_target[i].norm2.load_state_dict(agent.critics_target[i].norm2.state_dict())
-                new_agent.critics_target[i].fc_out.load_state_dict(agent.critics_target[i].fc_out.state_dict())
-            
-            try:
-                # Try to partially transfer optimizers
-                old_actor_sd = agent.actor_optimizer.state_dict()
-                new_actor_sd = new_agent.actor_optimizer.state_dict()
-                
-                # Only transfer param group LR and betas, not the per-param momentum state
-                for old_pg, new_pg in zip(old_actor_sd['param_groups'], 
-                                           new_actor_sd['param_groups'][:len(old_actor_sd['param_groups'])]):
-                    new_pg['lr'] = old_pg['lr']
-                    new_pg['betas'] = old_pg['betas']
-                    if 'eps' in old_pg:
-                        new_pg['eps'] = old_pg['eps']
-                
-                # Transfer state for params that exist in both (shared_base params)
-                for param_id, state in old_actor_sd['state'].items():
-                    if param_id < len(new_actor_sd['param_groups'][0]['params']):
-                        new_actor_sd['state'][param_id] = state
-                
-                new_agent.actor_optimizer.load_state_dict(new_actor_sd)
-                
-                for i in range(min(len(agent.critic_optimizers), len(new_agent.critic_optimizers))):
-                    old_critic_sd = agent.critic_optimizers[i].state_dict()
-                    new_critic_sd = new_agent.critic_optimizers[i].state_dict()
-                    for old_pg, new_pg in zip(old_critic_sd['param_groups'], 
-                                           new_critic_sd['param_groups'][:len(old_critic_sd['param_groups'])]):
-                        new_pg['lr'] = old_pg['lr']
-                        new_pg['betas'] = old_pg['betas']
-                        if 'eps' in old_pg:
-                            new_pg['eps'] = old_pg['eps']
-                    for param_id, state in old_critic_sd['state'].items():
-                        if param_id < len(new_critic_sd['param_groups'][0]['params']):
-                            new_critic_sd['state'][param_id] = state
-                    new_agent.critic_optimizers[i].load_state_dict(new_critic_sd)
-
-                print("Optimizer state partially transferred.")
-            except Exception as e:
-                print(f"Optimizer warm-start failed ({e}), using LR warmup instead.")
-        
-        # Post-curriculum LR warmup (50 episodes)
-        new_agent._curriculum_warmup_remaining = 50
-
-        # Clear replay buffer to avoid dimension mismatch
-        if config.get('curriculum', {}).get('reset_buffer', True):
-            new_agent.memory.clear()
-        
-        return new_agent, new_env
-
-    print(f"Starting training for {num_episodes} episodes...")
-
-    # FIX 2d: Paper trains on five benchmark scene types randomly selected each episode.
-    # Define the rotation list here so it can be extended easily.
     PAPER_SCENES = ["urban", "forest", "terrain", "structured", "dynamic"]
 
     pbar = tqdm(range(start_episode, num_episodes + 1), desc="Training", initial=start_episode - 1, total=num_episodes)
     try:
         for episode in pbar:
-            if config.get('curriculum', {}).get('enabled', False):
-                agent, env = apply_curriculum(agent, env, config, episode, device)
-                current_num_agents = agent.num_agents
-
             if hasattr(agent, '_curriculum_warmup_remaining') and agent._curriculum_warmup_remaining > 0:
                 warmup_len = 50
                 scale = 0.3 + 0.7 * (1.0 - agent._curriculum_warmup_remaining / warmup_len)
@@ -393,8 +269,6 @@ def main():
             else:
                 set_lr_scale(agent, 1.0)
 
-            # FIX 2e: rotate scene type each episode to match paper's multi-environment
-            # training (Section VI-A).  Only applied when no explicit --scenario is given.
             if args.scenario is None and hasattr(env, 'set_scene_type'):
                 scene = PAPER_SCENES[episode % len(PAPER_SCENES)]
                 env.set_scene_type(scene)
@@ -432,8 +306,6 @@ def main():
                     
                 actions, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden)
                 
-                # Compute mean hidden state norm (h part of lstm hidden state)
-                # actor_hidden is list of (h, c) for each agent. h is (batch_size, hidden_dim)
                 h_norms = [torch.norm(h_state[0]).item() for h_state in actor_hidden]
                 episode_h_norms.append(np.mean(h_norms))
                     
@@ -456,16 +328,13 @@ def main():
                 
                 episode_sat_rates.append(info.get('sat_rate', 0.0))
                 
-                # Per-agent done flags for the buffer
                 dones = info['agent_dones'].astype(np.float32)
                 
-                # Episode is over if all agents are done or max steps reached
                 done = terminated or truncated
                 global_step_count += 1
                 
                 agent.memory.push(obs, np.array(actions), rewards, next_obs, dones, done)
                 
-                # Only update if we have enough episodes in the buffer
                 if len(agent.memory) >= config['memory'].get('batch_size', 32) and global_step_count % config.get('update_interval', 10) == 0:
                     loss_dict = agent.update()
                     if loss_dict and 'critic_loss' in loss_dict:
@@ -516,7 +385,6 @@ def main():
                 actor_loss_history.append(np.nan)
                 q_value_mag_history.append(np.nan)
             
-            # Collect metrics prior to any buffer clears
             current_avg_reward = np.mean(recent_rewards) if len(recent_rewards) > 0 else 0.0
             current_success_rate = np.mean(recent_success) if len(recent_success) > 0 else 0.0
             current_avg_length = np.mean(recent_lengths) if len(recent_lengths) > 0 else 0.0
@@ -534,7 +402,6 @@ def main():
                 avg_sat = current_sat_rate
                 avg_act_std = current_act_std
                 
-                # FIX 5e: read current_sigma from AnnealedGaussianNoise for all agent types
                 if hasattr(agent, 'noise'):
                     noise_obj = agent.noise[0] if isinstance(agent.noise, list) else agent.noise
                     if hasattr(noise_obj, 'current_sigma'):
@@ -579,14 +446,13 @@ def main():
             if episode % config['logging']['save_interval'] == 0:
                 save_path = os.path.join(config['logging']['checkpoint_dir'], f"{args.agent}_ep{episode}.pt")
                 agent.save(save_path, 0.0, episode)
-                # Print log to inform that the checkpoint was successfully saved
                 print(f"Checkpoint saved: {save_path}")
                 
         if args.render:
             env.close()
     except KeyboardInterrupt:
         print("\nTraining interrupted by user! Saving current progress and generating plots...")
-        num_episodes = episode  # Update num_episodes to reflect actual episodes trained
+        num_episodes = episode
             
     # Final save
     final_path = os.path.join(config['logging']['checkpoint_dir'], f"{args.agent}_final.pt")
@@ -606,7 +472,6 @@ def main():
             json.dump(final_metrics, f, indent=4)
         print(f"Final metrics saved to {args.output_json}")
     
-    # --- ACADEMIC PLOTTING (Fig 8 Style) ---
     print("Generating Academic Learning Curves...")
     
     plots = [
