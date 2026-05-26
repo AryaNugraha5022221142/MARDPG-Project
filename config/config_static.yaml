@@ -1,0 +1,83 @@
+training:
+  num_episodes: 15000
+  num_agents: 5
+  seed: 42
+  device: "cuda"
+  warmup_episodes: 200
+
+network:
+  actor:
+    hidden_dim: 128
+    lstm_layers: 1
+    dropout: 0.0
+  critic:
+    hidden_dim: 128
+    lstm_layers: 1
+
+learning:
+  actor_lr: 1.0e-4
+  critic_lr: 3.0e-4
+  gamma: 0.99
+  max_grad_norm: 1.0
+
+memory:
+  buffer_size: 3000
+  batch_size: 64
+  seq_len: 40
+
+update_interval: 20
+
+targets:
+  update_rate: 0.01
+
+exploration:
+  sigma_start: 0.3
+  sigma_end: 0.05
+  total_steps: 7000000
+
+rewards:
+  goal_bonus: 200.0
+  collision_penalty: -50.0
+
+environment:
+  level: 1
+  action_bound: 0.5235987756
+  arena_size: [100, 100, 60]
+  num_obstacles: 25
+  max_velocity: 5.0
+  rangefinder_max_range: 10.0
+  collision_distance: 0.8
+  goal_distance: 2.0
+  dt: 0.01
+  dynamic_ratio: 0.0
+  max_steps: 2000
+  obs_dim: 30
+  reward_type: "baseline"
+  rate_limit_per_step: 0.2
+  randomize_layouts: true
+  sensor_noise_std: 0.02
+  yaw_noise_std: 0.034906585
+
+evaluation:
+  scenes: ["urban", "forest", "terrain", "structured", "dynamic"]
+  level: 3
+
+obs_structure:
+  angles: [0, 2]
+  ranges: [2, 27]
+  goal: [27, 30]
+
+curriculum:
+  enabled: false
+  schedule:
+    0: 5
+  reset_buffer: true
+  transfer_weights: true
+
+logging:
+  log_dir: "logs"
+  checkpoint_dir: "checkpoints"
+  log_interval: 100
+  save_interval: 500
+  use_wandb: false
+  wandb_project: "mardpg-thesis"
