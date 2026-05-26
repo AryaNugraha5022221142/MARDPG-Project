@@ -431,13 +431,24 @@ class MARDPG_Baseline:
 
     def load(self, filepath: str) -> Tuple[float, int]:
         state = torch.load(filepath, map_location=self.device)
-        self.actor.load_state_dict(state['actor'])
-        self.actor_target.load_state_dict(state['actor_target'])
-        self.actor_optimizer.load_state_dict(state['actor_optimizer'])
+        self.actor.load_state_dict(state['actor'], strict=False)
+        if 'actor_target' in state:
+            self.actor_target.load_state_dict(state['actor_target'], strict=False)
+            
+        try:
+            self.actor_optimizer.load_state_dict(state['actor_optimizer'])
+        except Exception:
+            pass
         
         for i in range(self.num_agents):
-            self.critics[i].load_state_dict(state[f'critic_{i}'])
-            self.critics_target[i].load_state_dict(state[f'critic_target_{i}'])
-            self.critic_optimizers[i].load_state_dict(state[f'critic_optimizer_{i}'])
+            if f'critic_{i}' in state:
+                self.critics[i].load_state_dict(state[f'critic_{i}'], strict=False)
+            if f'critic_target_{i}' in state:
+                self.critics_target[i].load_state_dict(state[f'critic_target_{i}'], strict=False)
+            if f'critic_optimizer_{i}' in state:
+                try:
+                    self.critic_optimizers[i].load_state_dict(state[f'critic_optimizer_{i}'])
+                except Exception:
+                    pass
             
         return state.get('epsilon', 0.0), state.get('episode', 0)
