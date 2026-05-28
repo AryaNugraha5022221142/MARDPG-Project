@@ -34,9 +34,11 @@ def main():
         env.render()
         
         # Take a few random steps just to show some movement
+        import numpy as np
         print(f"Rendering {scene} for 5 seconds...")
         for _ in range(100):
-            actions = [env.action_space.sample() for _ in range(args.num_agents)]
+            action_bound = getattr(env, 'action_bound', 0.5)
+            actions = np.random.uniform(-action_bound, action_bound, size=(args.num_agents, 2))
             obs, rewards, terminated, truncated, info = env.step(actions)
             env.render()
             time.sleep(0.05)
