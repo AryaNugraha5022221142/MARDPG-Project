@@ -28,6 +28,7 @@ def main():
     parser.add_argument('--level', type=str, default='1,2,3,4,5', help='Comma separated levels or single level (e.g., 1,2,3,4,5)')
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--episodes', type=int, default=250, help='Episodes per scene/level')
+    parser.add_argument('--render', action='store_true', help='Enable 3D visualization during evaluation')
     parser.add_argument('--output-json', type=str, default='logs/multi_scene_evaluation_results.json')
     parser.add_argument('--output-csv', type=str, default='logs/multi_scene_evaluation_results.csv')
     parser.add_argument('--output-plot', type=str, default='logs/multi_scene_evaluation_metrics.png')
@@ -86,6 +87,9 @@ def main():
                     num_agents=num_agents,
                     config=env_config
                 )
+            
+            if args.render:
+                env.render_mode = 'human'
                 
             scene_metrics = {
                 'success': [],
@@ -127,6 +131,8 @@ def main():
                     ep_positions.append(prev_positions.copy())
     
                 while steps < env.max_steps:
+                    if args.render:
+                        env.render()
                     action, actor_hidden, critic_hidden = agent.select_actions(obs, actor_hidden, critic_hidden, explore=False)
                     
                     next_obs, rewards, terminated, truncated, info = env.step(action)
@@ -190,6 +196,9 @@ def main():
                     os.makedirs('logs', exist_ok=True)
                     plt.savefig(f'logs/{key}_trajectory_ep0.png')
                     plt.close(fig_traj)
+
+            if args.render:
+                env.close()
 
         # Aggregate
         sr = float(np.mean(scene_metrics['success'])) * 100
