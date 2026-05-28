@@ -13,6 +13,7 @@ def main():
     parser = argparse.ArgumentParser(description="Visualize different environment scenes")
     parser.add_argument('--scene', type=str, default='all', help='Scene to visualize (urban, forest, terrain, structured, dynamic) or "all"')
     parser.add_argument('--num-agents', type=int, default=5, help='Number of agents')
+    parser.add_argument('--level', type=int, default=3, help='Difficulty level (1-5)')
     args = parser.parse_args()
 
     with open("config/config_static.yaml", "r") as f:
@@ -24,7 +25,7 @@ def main():
         print(f"\n--- Visualizing {scene.upper()} Scene ---")
         env = BenchmarkWrappedEnv(
             benchmark_name=scene,
-            level=3,
+            level=args.level,
             num_agents=args.num_agents,
             config=config['environment']
         )
