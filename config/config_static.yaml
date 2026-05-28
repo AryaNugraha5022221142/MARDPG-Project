@@ -1,5 +1,5 @@
 training:
-  num_episodes: 15000
+  num_episodes: 30000
   num_agents: 5
   seed: 42
   device: "cuda"
@@ -57,6 +57,7 @@ environment:
   randomize_layouts: true
   sensor_noise_std: 0.02
   yaw_noise_std: 0.034906585
+  cooperative: true
 
 evaluation:
   scenes: ["urban", "forest", "terrain", "structured", "dynamic"]
@@ -69,8 +70,6 @@ obs_structure:
 
 curriculum:
   enabled: false
-  schedule:
-    0: 5
   reset_buffer: true
   transfer_weights: true
 

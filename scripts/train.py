@@ -300,26 +300,29 @@ def main():
                 new_agent.actor_target.heads[i].load_state_dict(agent.actor_target.heads[i].state_dict())
             
             # Transfer critic base (if attention-based, attention weights transfer)
-            for i in range(min(len(agent.critics), len(new_agent.critics))):
+            n_old = len(agent.critics)
+            n_new = len(new_agent.critics)
+            for i in range(n_new):
+                src_idx = i % n_old
                 # Transfer encoder and attention layers
-                new_agent.critics[i].encoder.load_state_dict(agent.critics[i].encoder.state_dict())
-                new_agent.critics[i].attention.load_state_dict(agent.critics[i].attention.state_dict())
-                new_agent.critics[i].ffn.load_state_dict(agent.critics[i].ffn.state_dict())
-                new_agent.critics[i].lstm.load_state_dict(agent.critics[i].lstm.state_dict())
+                new_agent.critics[i].encoder.load_state_dict(agent.critics[src_idx].encoder.state_dict())
+                new_agent.critics[i].attention.load_state_dict(agent.critics[src_idx].attention.state_dict())
+                new_agent.critics[i].ffn.load_state_dict(agent.critics[src_idx].ffn.state_dict())
+                new_agent.critics[i].lstm.load_state_dict(agent.critics[src_idx].lstm.state_dict())
                 
                 # Fix: transfer the missing normalization and output layers
-                new_agent.critics[i].norm1.load_state_dict(agent.critics[i].norm1.state_dict())
-                new_agent.critics[i].norm2.load_state_dict(agent.critics[i].norm2.state_dict())
-                new_agent.critics[i].fc_out.load_state_dict(agent.critics[i].fc_out.state_dict())
+                new_agent.critics[i].norm1.load_state_dict(agent.critics[src_idx].norm1.state_dict())
+                new_agent.critics[i].norm2.load_state_dict(agent.critics[src_idx].norm2.state_dict())
+                new_agent.critics[i].fc_out.load_state_dict(agent.critics[src_idx].fc_out.state_dict())
                 
-                new_agent.critics_target[i].encoder.load_state_dict(agent.critics_target[i].encoder.state_dict())
-                new_agent.critics_target[i].attention.load_state_dict(agent.critics_target[i].attention.state_dict())
-                new_agent.critics_target[i].ffn.load_state_dict(agent.critics_target[i].ffn.state_dict())
-                new_agent.critics_target[i].lstm.load_state_dict(agent.critics_target[i].lstm.state_dict())
+                new_agent.critics_target[i].encoder.load_state_dict(agent.critics_target[src_idx].encoder.state_dict())
+                new_agent.critics_target[i].attention.load_state_dict(agent.critics_target[src_idx].attention.state_dict())
+                new_agent.critics_target[i].ffn.load_state_dict(agent.critics_target[src_idx].ffn.state_dict())
+                new_agent.critics_target[i].lstm.load_state_dict(agent.critics_target[src_idx].lstm.state_dict())
                 
-                new_agent.critics_target[i].norm1.load_state_dict(agent.critics_target[i].norm1.state_dict())
-                new_agent.critics_target[i].norm2.load_state_dict(agent.critics_target[i].norm2.state_dict())
-                new_agent.critics_target[i].fc_out.load_state_dict(agent.critics_target[i].fc_out.state_dict())
+                new_agent.critics_target[i].norm1.load_state_dict(agent.critics_target[src_idx].norm1.state_dict())
+                new_agent.critics_target[i].norm2.load_state_dict(agent.critics_target[src_idx].norm2.state_dict())
+                new_agent.critics_target[i].fc_out.load_state_dict(agent.critics_target[src_idx].fc_out.state_dict())
             
             try:
                 # Try to partially transfer optimizers
@@ -377,6 +380,9 @@ def main():
     pbar = tqdm(range(start_episode, num_episodes + 1), desc="Training", initial=start_episode - 1, total=num_episodes)
     try:
         for episode in pbar:
+            if hasattr(env, 'set_episode'):
+                env.set_episode(episode, num_episodes)
+                
             if config.get('curriculum', {}).get('enabled', False):
                 agent, env = apply_curriculum(agent, env, config, episode, device)
                 current_num_agents = agent.num_agents

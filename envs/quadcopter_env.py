@@ -189,6 +189,10 @@ class QuadcopterEnv:
         self._generate_obstacles()
         print(f"Curriculum Level Updated: {level} (Arena: {self.arena_size}, Obstacles: {self.num_obstacles}, Dynamic: {self.dynamic_ratio:.1f})")
 
+    def set_episode(self, episode: int, max_episodes: int = 15000):
+        self.current_episode = episode
+        self.max_curriculum_episodes = max_episodes
+        
     def reset(self, seed=None) -> Tuple[np.ndarray, Dict[str, Any]]:
         """Resets the environment and returns initial observations."""
         if seed is not None:
@@ -224,8 +228,21 @@ class QuadcopterEnv:
         
         # Random start positions on the "left" side
         for i in range(self.num_agents):
+            try:
+                progress = min(1.0, getattr(self, 'current_episode', 15000) / getattr(self, 'max_curriculum_episodes', 15000))
+                scale = 0.2 + 0.8 * progress
+            except:
+                scale = 1.0
+                
+            d_max = self.arena_size[0] - 15.0
+            target_dist = d_max * scale
+            
+            goal_x = self.goals[i][0]
+            start_x = goal_x - target_dist
+            start_x = np.clip(start_x, 2.0, self.arena_size[0] - 5.0)
+            
             start_pos = np.array([
-                np.random.uniform(4.0, 8.0),
+                start_x + np.random.uniform(-2.0, 2.0),
                 np.random.uniform(8.0, self.arena_size[1] - 8.0),
                 np.random.uniform(4.0, self.arena_size[2] - 4.0)
             ])

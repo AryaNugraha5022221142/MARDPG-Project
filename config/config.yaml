@@ -57,6 +57,7 @@ environment:
   randomize_layouts: true
   sensor_noise_std: 0.02
   yaw_noise_std: 0.034906585
+  cooperative: true
 
 evaluation:
   scenes: ["urban", "forest", "terrain", "structured", "dynamic"]

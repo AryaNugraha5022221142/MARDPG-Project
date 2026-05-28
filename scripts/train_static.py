@@ -257,6 +257,9 @@ def main():
     pbar = tqdm(range(start_episode, num_episodes + 1), desc="Training", initial=start_episode - 1, total=num_episodes)
     try:
         for episode in pbar:
+            if hasattr(env, 'set_episode'):
+                env.set_episode(episode, num_episodes)
+                
             if hasattr(agent, '_curriculum_warmup_remaining') and agent._curriculum_warmup_remaining > 0:
                 warmup_len = 50
                 scale = 0.3 + 0.7 * (1.0 - agent._curriculum_warmup_remaining / warmup_len)
@@ -372,7 +375,6 @@ def main():
             collision_history.append(agent_col_rate)
             
             hidden_state_norm_history.append(np.mean(episode_h_norms) if hasattr(agent, 'actor') else np.nan)
-            tracking_error_history.append(np.mean(episode_tracking_errors))
             action_smoothness_history.append(np.mean(episode_action_smoothness))
             min_agent_dist_history.append(np.mean(episode_min_agent_distances))
             
@@ -437,14 +439,14 @@ def main():
                     if not np.isnan(hidden_state_norm_history[-1]):
                         log_data['hidden_state_norm'] = hidden_state_norm_history[-1]
                         
-                    log_data['tracking_error'] = tracking_error_history[-1]
                     log_data['action_smoothness'] = action_smoothness_history[-1]
                     log_data['min_agent_dist'] = min_agent_dist_history[-1]
                         
                     wandb.log(log_data)
                     
             if episode % config['logging']['save_interval'] == 0:
-                save_path = os.path.join(config['logging']['checkpoint_dir'], f"{args.agent}_ep{episode}.pt")
+                run_prefix = f"{args.agent}_static_{args.num_agents}agents"
+                save_path = os.path.join(config['logging']['checkpoint_dir'], f"{run_prefix}_ep{episode}.pt")
                 agent.save(save_path, 0.0, episode)
                 print(f"Checkpoint saved: {save_path}")
                 

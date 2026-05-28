@@ -15,7 +15,11 @@ from agents.mardpg_baseline import MARDPG_Baseline, AttentionCritic
 
 
 def load_config():
-    with open('config/config.yaml', 'r') as f:
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config', type=str, default='config/config.yaml')
+    args, _ = parser.parse_known_args()
+    with open(args.config, 'r') as f:
         return yaml.safe_load(f)
 
 
@@ -25,11 +29,14 @@ def test_config_integrity():
     config = load_config()
     
     # C.1: Curriculum start matches num_agents
-    start_agents = config['training']['num_agents']
-    curriculum_start = list(config['curriculum']['schedule'].values())[0]
-    assert start_agents == curriculum_start, \
-        f"FAIL C.1: num_agents ({start_agents}) != curriculum start ({curriculum_start})"
-    print(f"  ✓ C.1: num_agents ({start_agents}) matches curriculum start")
+    if not config.get('curriculum', {}).get('enabled', True):
+        print("  ℹ Curriculum disabled — skipping C.1 check")
+    else:
+        start_agents = config['training']['num_agents']
+        curriculum_start = list(config['curriculum']['schedule'].values())[0]
+        assert start_agents == curriculum_start, \
+            f"FAIL C.1: num_agents ({start_agents}) != curriculum start ({curriculum_start})"
+        print(f"  ✓ C.1: num_agents ({start_agents}) matches curriculum start")
     
     # Buffer size sufficient
     buffer_size = config['memory']['buffer_size']

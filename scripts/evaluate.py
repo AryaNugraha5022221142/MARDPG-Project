@@ -200,32 +200,32 @@ def main():
             if args.render:
                 env.close()
 
-        # Aggregate
-        sr = float(np.mean(scene_metrics['success'])) * 100
-        cr = float(np.mean(scene_metrics['collision'])) * 100
-        at = float(np.mean(scene_metrics['time_to_goal']))
-        
-        all_results[key] = {
-        'success_rate': float(np.mean(scene_metrics['success'])),
-        'collision_rate': float(np.mean(scene_metrics['collision'])),
-        'trapped_rate': float(np.mean(scene_metrics['trapped'])),
-        'path_efficiency': float(np.mean(scene_metrics['path_efficiency'])),
-        'fairness': float(np.mean(scene_metrics['fairness'])),
-        'smoothness': float(np.mean(scene_metrics['smoothness'])),
-        'jerk': float(np.mean(scene_metrics['jerk'])),
-        'safety_clearance': float(np.mean(scene_metrics['safety_clearance'])),
-        'average_time_to_goal': at,
-        'obstacle_count': scene_metrics['obstacle_count'],
-        'dynamic_obstacle_count': scene_metrics['dynamic_obstacle_count']
-        }
-        print(f"\n\nResults for {key}:\n" + "-"*30)
-        print(f"Success Rate:    {all_results[key]['success_rate']*100:.1f}%")
-        print(f"Collision Rate:  {all_results[key]['collision_rate']*100:.1f}%")
-        print(f"Trapped Rate:    {all_results[key]['trapped_rate']*100:.1f}%")
-        print(f"Path Efficiency: {all_results[key]['path_efficiency']:.3f}")
-        print(f"Fairness Index:  {all_results[key]['fairness']:.3f}")
-        print(f"Avg Time:        {all_results[key]['average_time_to_goal']:.1f} steps")
-        print("-" * 30 + "\n")
+            # Aggregate
+            sr = float(np.mean(scene_metrics['success'])) * 100
+            cr = float(np.mean(scene_metrics['collision'])) * 100
+            at = float(np.mean(scene_metrics['time_to_goal']))
+            
+            all_results[key] = {
+            'success_rate': float(np.mean(scene_metrics['success'])),
+            'collision_rate': float(np.mean(scene_metrics['collision'])),
+            'trapped_rate': float(np.mean(scene_metrics['trapped'])),
+            'path_efficiency': float(np.mean(scene_metrics['path_efficiency'])),
+            'fairness': float(np.mean(scene_metrics['fairness'])),
+            'smoothness': float(np.mean(scene_metrics['smoothness'])),
+            'jerk': float(np.mean(scene_metrics['jerk'])),
+            'safety_clearance': float(np.mean(scene_metrics['safety_clearance'])),
+            'average_time_to_goal': at,
+            'obstacle_count': scene_metrics['obstacle_count'],
+            'dynamic_obstacle_count': scene_metrics['dynamic_obstacle_count']
+            }
+            print(f"\n\nResults for {key}:\n" + "-"*30)
+            print(f"Success Rate:    {all_results[key]['success_rate']*100:.1f}%")
+            print(f"Collision Rate:  {all_results[key]['collision_rate']*100:.1f}%")
+            print(f"Trapped Rate:    {all_results[key]['trapped_rate']*100:.1f}%")
+            print(f"Path Efficiency: {all_results[key]['path_efficiency']:.3f}")
+            print(f"Fairness Index:  {all_results[key]['fairness']:.3f}")
+            print(f"Avg Time:        {all_results[key]['average_time_to_goal']:.1f} steps")
+            print("-" * 30 + "\n")
 
     # Aggregate over scenes
     successes = [res['success_rate'] for res in all_results.values()]

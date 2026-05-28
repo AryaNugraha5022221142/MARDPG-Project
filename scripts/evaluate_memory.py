@@ -12,7 +12,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='config/config.yaml')
     parser.add_argument('--model-path', type=str, required=True)
-    parser.add_argument('--num-episodes', type=int, default=50)
+    parser.add_argument('--num-episodes', type=int, default=200)
     args = parser.parse_args()
 
     with open(args.config, 'r') as f:

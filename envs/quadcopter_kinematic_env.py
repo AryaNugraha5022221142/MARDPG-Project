@@ -302,7 +302,7 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
             for j in range(self.num_agents):
                 if i == j or self.agent_dones[j]:
                     continue
-                d = np.linalg.norm(pos - self.agents[j].state[0:3]) - 0.6  # 0.3 radius each
+                d = np.linalg.norm(pos - self.agents[j].state[0:3]) - self.collision_dist  # use true collision dist
                 if d < d_min_agent:
                     d_min_agent = d
                     
@@ -332,6 +332,12 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
                 rewards[i] += self.reward_config.get('collision_penalty', 0.0)
                 
         info['agent_dones'] = self.agent_dones.copy()
+        
+        if getattr(self, 'cooperative', False) or self.config.get('cooperative', False):
+            mean_r = np.mean(rewards)
+            rewards[:] = 0.5 * rewards + 0.5 * mean_r
+            
+        rewards = np.clip(rewards, -200.0, 300.0)
         
         individual_successes = sum(1 for i in range(self.num_agents) 
                                   if self.agent_dones[i] and 

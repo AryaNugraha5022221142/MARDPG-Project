@@ -345,6 +345,9 @@ class MARDPG_Baseline:
                 target_q_seq, _ = self.critics_target[i](next_obs, next_actions_all, critic_hidden_target[i], agent_idx=i)
                 target_q_seq = target_q_seq.squeeze(-1)
                 target_q = rewards[:, :, i] + self.gamma * target_q_seq * (1 - dones[:, :, i])
+                if torch.isnan(target_q).any() or torch.isinf(target_q).any():
+                    print(f"[WARNING] NaN/Inf in target_q for agent {i}. Skipping update.")
+                    return {}
                 
             current_q_seq, _ = self.critics[i](obs, actions, critic_hidden_update[i], agent_idx=i)
             current_q = current_q_seq.squeeze(-1)
@@ -359,6 +362,13 @@ class MARDPG_Baseline:
             
             self.critic_optimizers[i].zero_grad()
             critic_loss.backward()
+            
+            for name, p in self.critics[i].named_parameters():
+                if p.grad is not None and (torch.isnan(p.grad).any() or torch.isinf(p.grad).any()):
+                    print(f"[WARNING] NaN gradient in critic {i} param {name}. Skipping.")
+                    self.critic_optimizers[i].zero_grad()
+                    break
+                    
             torch.nn.utils.clip_grad_norm_(self.critics[i].parameters(), self.max_grad_norm)
             self.critic_optimizers[i].step()
             
