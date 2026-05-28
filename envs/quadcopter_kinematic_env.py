@@ -246,11 +246,14 @@ class QuadcopterKinematicEnv(QuadcopterEnv):
             
             action = np.asarray(actions[i], dtype=np.float32).copy()
             delta = action - self.prev_actions[i]
-            action = self.prev_actions[i] + np.clip(
+            
+            rate_limited_action = self.prev_actions[i] + np.clip(
                 delta, 
                 -self.rate_limit_per_step, 
                 +self.rate_limit_per_step
             )
+            action = np.clip(rate_limited_action, -self.action_bound, self.action_bound)
+
             action_smoothness.append(np.mean(np.abs(action - self.prev_actions[i])))
             self.prev_actions[i] = action.copy()
             

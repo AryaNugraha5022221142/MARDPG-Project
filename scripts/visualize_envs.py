@@ -23,13 +23,30 @@ def main():
     
     for scene in scenes:
         print(f"\n--- Visualizing {scene.upper()} Scene ---")
+        
+        # Determine arena size based on level (same logic as QuadcopterEnv set_curriculum_level)
+        if args.level == 0:
+            arena_size = [30.0, 30.0, 15.0]
+        elif args.level == 1:
+            arena_size = [50.0, 50.0, 20.0]
+        elif args.level == 2:
+            arena_size = [75.0, 75.0, 30.0]
+        elif args.level == 3:
+            arena_size = [100.0, 100.0, 40.0]
+        else:
+            arena_size = [130.0, 130.0, 50.0]
+            
+        env_config = config['environment'].copy()
+        env_config['arena_size'] = arena_size
+        
         env = BenchmarkWrappedEnv(
             benchmark_name=scene,
             level=args.level,
             num_agents=args.num_agents,
-            config=config['environment']
+            config=env_config
         )
         env.render_mode = 'human'
+
         
         obs, _ = env.reset()
         env.render()
