@@ -30,41 +30,39 @@ class MARDPGBaseNetwork(nn.Module):
         super().__init__()
         self.obs_structure = obs_structure
         
-        angles_dim = obs_structure['angles'][1] - obs_structure['angles'][0]
+        kin_dim = obs_structure.get('kinematics', [30, 38])[1] - obs_structure.get('kinematics', [30, 38])[0]
         goal_dim = obs_structure['goal'][1] - obs_structure['goal'][0]
         
         self.conv = nn.Conv2d(in_channels=1, out_channels=32, kernel_size=2, stride=1)
-        self.fc_angles = nn.Linear(angles_dim, 8)
+        self.fc_kin = nn.Linear(kin_dim, 16)
         self.fc_goal = nn.Linear(goal_dim, 8)
-        self.fusion_dim = 32 * 4 * 4 + 8 + 8  # 4x4 output spatial size * 32 channels + 8 (angles) + 8 (goal)
+        self.fusion_dim = 32 * 4 * 4 + 16 + 8
 
     def forward(self, x: torch.Tensor):
         b, s, _ = x.shape
         
-        angles = x[:, :, self.obs_structure['angles'][0]:self.obs_structure['angles'][1]]
         ranges = x[:, :, self.obs_structure['ranges'][0]:self.obs_structure['ranges'][1]]
         goal = x[:, :, self.obs_structure['goal'][0]:self.obs_structure['goal'][1]]
         
+        kin_bounds = self.obs_structure.get('kinematics', [30, 38])
+        kinematics = x[:, :, kin_bounds[0]:kin_bounds[1]]
+        
         ranges_2d = ranges.contiguous().view(b * s, 1, 5, 5)
-        c_out = F.relu(self.conv(ranges_2d))
-        c_out = c_out.view(b * s, -1)
+        c_out = F.relu(self.conv(ranges_2d)).view(b * s, -1)
 
-        angles_flat = angles.contiguous().view(b * s, -1)
-        goal_flat = goal.contiguous().view(b * s, -1)
+        kin_out = F.relu(self.fc_kin(kinematics.contiguous().view(b * s, -1)))
+        goal_out = F.relu(self.fc_goal(goal.contiguous().view(b * s, -1)))
 
-        angles_out = F.relu(self.fc_angles(angles_flat))
-        goal_out = F.relu(self.fc_goal(goal_flat))
-
-        fused = torch.cat([c_out, angles_out, goal_out], dim=1).view(b, s, -1)
+        fused = torch.cat([c_out, kin_out, goal_out], dim=1).view(b, s, -1)
         return fused
 
 class ActorLSTMAgentHead(nn.Module):
-    def __init__(self, fusion_dim: int, hidden_dim: int, action_bound: float):
+    def __init__(self, fusion_dim: int, hidden_dim: int, action_bound: float, action_dim: int = 4):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.action_bound = action_bound
         self.lstm = nn.LSTM(fusion_dim, hidden_dim, num_layers=1, batch_first=True)
-        self.output_head = nn.Linear(hidden_dim, 2)
+        self.output_head = nn.Linear(hidden_dim, action_dim)
 
     def init_hidden(self, batch_size: int = 1, device: str = 'cpu'):
         h0 = torch.zeros(1, batch_size, self.hidden_dim).to(device)
@@ -76,22 +74,19 @@ class ActorLSTMAgentHead(nn.Module):
         logits = self.output_head(out)
         norm_out = torch.tanh(logits)
         actions = self.action_bound * norm_out
-        rho = actions[:, :, 0]
-        tau = actions[:, :, 1]
-        return actions, hidden, out, (rho, tau)
+        return actions, hidden, out, None
 
 class MultiActorLSTMBaseline(nn.Module):
     """
     Implements a shared base network with per-agent LSTM and output heads.
     """
-    def __init__(self, obs_dim_total: int, num_agents: int = 3, hidden_dim: int = 128, device: str = 'cpu', action_bound: float = 0.5235987756, obs_structure: dict = None):
+    def __init__(self, obs_dim_total: int, num_agents: int = 3, hidden_dim: int = 128, device: str = 'cpu', action_bound: float = 0.5235987756, obs_structure: dict = None, action_dim: int = 4):
         super().__init__()
-        assert action_bound < 1.0, "Action bound must be < 1.0 for kinematic control to prevent instability."
         if obs_structure is None:
-            obs_structure = {'angles': [0, 2], 'ranges': [2, 27], 'goal': [27, 30]}
+            obs_structure = {'ranges': [0, 25], 'goal': [25, 30], 'kinematics': [30, 38]}
         self.num_agents = num_agents
         self.shared_base = MARDPGBaseNetwork(obs_structure)
-        self.heads = nn.ModuleList([ActorLSTMAgentHead(self.shared_base.fusion_dim, hidden_dim, action_bound) for _ in range(num_agents)])
+        self.heads = nn.ModuleList([ActorLSTMAgentHead(self.shared_base.fusion_dim, hidden_dim, action_bound, action_dim) for _ in range(num_agents)])
 
     def init_hidden(self, batch_size: int = 1, device: str = 'cpu'):
         return self.heads[0].init_hidden(batch_size, device)
@@ -106,14 +101,12 @@ class MultiActorLSTMBaseline(nn.Module):
         if hidden is None:
             hidden = self.init_hidden(x.size(0), x.device)
 
-        actions, hidden_out, lstm_out, (rho, tau) = self.heads[agent_idx](fused, hidden)
+        actions, hidden_out, lstm_out, _ = self.heads[agent_idx](fused, hidden)
         
         if is_single_step:
             actions = actions.squeeze(1)
-            rho = rho.squeeze(1)
-            tau = tau.squeeze(1)
 
-        return actions, hidden_out, lstm_out, (rho, tau)
+        return actions, hidden_out, lstm_out, None
 
 class AttentionCritic(nn.Module):
     def __init__(self, obs_dim: int, action_dim: int, num_agents: int, 
@@ -232,9 +225,11 @@ class MARDPG_Baseline:
         self.action_bound = float(config.get('environment', {}).get('action_bound', np.pi / 6.0))
         
         hidden_dim = config['network']['actor'].get('hidden_dim', 128)
-        obs_structure = config.get('obs_structure', {'angles': [0, 2], 'ranges': [2, 27], 'goal': [27, 30]})
+        obs_structure = config.get('obs_structure', {'ranges': [0, 25], 'goal': [25, 30], 'kinematics': [30, 38]})
         
-        self.actor = MultiActorLSTMBaseline(obs_dim, num_agents, hidden_dim, device, self.action_bound, obs_structure).to(self.device)
+        self.actor = MultiActorLSTMBaseline(
+            obs_dim, num_agents, hidden_dim, device, self.action_bound, obs_structure, self.action_dim
+        ).to(self.device)
         self.actor_target = copy.deepcopy(self.actor).to(self.device)
         
         critic_hidden_dim = config['network'].get('critic', {}).get('hidden_dim', hidden_dim)

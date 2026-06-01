@@ -587,7 +587,7 @@ class QuadcopterEnv:
                 # Use the old_dist_to_goal we just saved
                 r_dist = alpha * (old_dist_to_goal - dist_to_goal)
                 
-                r_col = -lam * math.exp(-sigma * d_min)
+                r_col = -lam * math.exp(-sigma * max(0.0, d_min))
                     
                 # Paper r_free
                 idx_ranges = obs[i, :25]
@@ -599,7 +599,7 @@ class QuadcopterEnv:
             else:
                 lam_col = self.reward_config.get('collision_lambda', 5.0)
                 sig_col = self.reward_config.get('collision_sigma', 15.0)
-                collision_penalty = -lam_col * math.exp(-sig_col * d_min)
+                collision_penalty = -lam_col * math.exp(-sig_col * max(0.0, d_min))
                 step_penalty = -0.02
                 tracking_weight = self.reward_config.get('weights', {}).get('tracking', 0.3)
                 tracking_penalty = -tracking_weight * float(tracking_errors[i]) ** 2

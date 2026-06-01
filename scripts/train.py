@@ -304,8 +304,14 @@ def main():
             n_new = len(new_agent.critics)
             for i in range(n_new):
                 src_idx = i % n_old
-                # Transfer encoder and attention layers
-                new_agent.critics[i].encoder.load_state_dict(agent.critics[src_idx].encoder.state_dict())
+                # BUG FIX: Safely load critic encoder weights (skip mismatched linear layers)
+                old_enc_state = agent.critics[src_idx].encoder.state_dict()
+                new_enc_state = new_agent.critics[i].encoder.state_dict()
+                for name, param in old_enc_state.items():
+                    if param.shape == new_enc_state[name].shape:
+                        new_enc_state[name].copy_(param)
+                new_agent.critics[i].encoder.load_state_dict(new_enc_state)
+                
                 new_agent.critics[i].attention.load_state_dict(agent.critics[src_idx].attention.state_dict())
                 new_agent.critics[i].ffn.load_state_dict(agent.critics[src_idx].ffn.state_dict())
                 new_agent.critics[i].lstm.load_state_dict(agent.critics[src_idx].lstm.state_dict())
@@ -315,7 +321,13 @@ def main():
                 new_agent.critics[i].norm2.load_state_dict(agent.critics[src_idx].norm2.state_dict())
                 new_agent.critics[i].fc_out.load_state_dict(agent.critics[src_idx].fc_out.state_dict())
                 
-                new_agent.critics_target[i].encoder.load_state_dict(agent.critics_target[src_idx].encoder.state_dict())
+                old_tgt_enc_state = agent.critics_target[src_idx].encoder.state_dict()
+                new_tgt_enc_state = new_agent.critics_target[i].encoder.state_dict()
+                for name, param in old_tgt_enc_state.items():
+                    if param.shape == new_tgt_enc_state[name].shape:
+                        new_tgt_enc_state[name].copy_(param)
+                new_agent.critics_target[i].encoder.load_state_dict(new_tgt_enc_state)
+                
                 new_agent.critics_target[i].attention.load_state_dict(agent.critics_target[src_idx].attention.state_dict())
                 new_agent.critics_target[i].ffn.load_state_dict(agent.critics_target[src_idx].ffn.state_dict())
                 new_agent.critics_target[i].lstm.load_state_dict(agent.critics_target[src_idx].lstm.state_dict())
@@ -324,44 +336,6 @@ def main():
                 new_agent.critics_target[i].norm2.load_state_dict(agent.critics_target[src_idx].norm2.state_dict())
                 new_agent.critics_target[i].fc_out.load_state_dict(agent.critics_target[src_idx].fc_out.state_dict())
             
-            try:
-                # Try to partially transfer optimizers
-                old_actor_sd = agent.actor_optimizer.state_dict()
-                new_actor_sd = new_agent.actor_optimizer.state_dict()
-                
-                # Only transfer param group LR and betas, not the per-param momentum state
-                for old_pg, new_pg in zip(old_actor_sd['param_groups'], 
-                                           new_actor_sd['param_groups'][:len(old_actor_sd['param_groups'])]):
-                    new_pg['lr'] = old_pg['lr']
-                    new_pg['betas'] = old_pg['betas']
-                    if 'eps' in old_pg:
-                        new_pg['eps'] = old_pg['eps']
-                
-                # Transfer state for params that exist in both (shared_base params)
-                for param_id, state in old_actor_sd['state'].items():
-                    if param_id < len(new_actor_sd['param_groups'][0]['params']):
-                        new_actor_sd['state'][param_id] = state
-                
-                new_agent.actor_optimizer.load_state_dict(new_actor_sd)
-                
-                for i in range(min(len(agent.critic_optimizers), len(new_agent.critic_optimizers))):
-                    old_critic_sd = agent.critic_optimizers[i].state_dict()
-                    new_critic_sd = new_agent.critic_optimizers[i].state_dict()
-                    for old_pg, new_pg in zip(old_critic_sd['param_groups'], 
-                                           new_critic_sd['param_groups'][:len(old_critic_sd['param_groups'])]):
-                        new_pg['lr'] = old_pg['lr']
-                        new_pg['betas'] = old_pg['betas']
-                        if 'eps' in old_pg:
-                            new_pg['eps'] = old_pg['eps']
-                    for param_id, state in old_critic_sd['state'].items():
-                        if param_id < len(new_critic_sd['param_groups'][0]['params']):
-                            new_critic_sd['state'][param_id] = state
-                    new_agent.critic_optimizers[i].load_state_dict(new_critic_sd)
-
-                print("Optimizer state partially transferred.")
-            except Exception as e:
-                print(f"Optimizer warm-start failed ({e}), using LR warmup instead.")
-        
         # Post-curriculum LR warmup (50 episodes)
         new_agent._curriculum_warmup_remaining = 50
 
